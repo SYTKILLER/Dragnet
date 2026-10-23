@@ -1,0 +1,65 @@
+# ===== 罗网 Dragnet =====
+# 原则：仅上传最小项目内容，开发期间产生的文档、截图、临时产物一律不入库
+
+# --- 开发期间产生的文档与截图 ---
+*.doc
+*.docx
+*.pdf
+*.xlsx
+*.pptx
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.webp
+!docs/**/*.png
+docs/notes/
+notes/
+scratch/
+设计文档/
+需求文档/
+
+# --- 系统与工具 ---
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*~
+
+# --- 依赖与构建产物 ---
+node_modules/
+dist/
+build/
+out/
+target/
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.dylib
+*.apk
+*.hap
+*.app
+
+# --- 日志与缓存 ---
+*.log
+logs/
+.cache/
+.tmp/
+tmp/
+
+# --- IDE / 编辑器 ---
+.idea/
+.vscode/
+*.iml
+
+# --- 敏感信息 ---
+.env
+.env.*
+*.key
+*.pem
+credentials.*
+secret.*
