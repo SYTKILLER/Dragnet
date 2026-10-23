@@ -2,10 +2,16 @@
 # 原则：仅上传最小项目内容（源码、配置、必需资源）。
 # 开发期间产生的文档、截图、临时产物一律不入库。
 
-# ---- 开发文档 ----
+# --- 开发期间产生的文档与截图 ---
 docs/
 doc/
 notes/
+scratch/
+screenshots/
+screens/
+snips/
+设计文档/
+需求文档/
 *.doc
 *.docx
 *.pdf
@@ -14,43 +20,60 @@ notes/
 *.xls
 *.xlsx
 *.wps
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.webp
 
-# 截图 / 草图目录
-screenshots/
-screens/
-snips/
-
-# ---- IDE / 编辑器 ----
-.idea/
-.vscode/
+# --- 系统与工具 ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+desktop.ini
 *.swp
 *.swo
+*~
 
-# ---- 构建产物 / 依赖 ----
-build/
+# --- 依赖与构建产物 ---
+node_modules/
 dist/
+build/
 out/
 target/
-node_modules/
-__pycache__/
-*.py[cod]
 .venv/
 venv/
+__pycache__/
+*.py[cod]
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.dylib
+*.apk
+*.hap
+*.app
 
-# ---- 日志 / 缓存 / 临时文件 ----
+# --- 日志与缓存 ---
 *.log
 logs/
 .cache/
+.tmp/
 tmp/
 *.tmp
 *.bak
 
-# ---- 操作系统 ----
-Thumbs.db
-Desktop.ini
-.DS_Store
+# --- IDE / 编辑器 ---
+.idea/
+.vscode/
+*.iml
 
-# ---- 凭据 / 密钥 ----
+# --- 敏感信息 ---
 .env
-*.pem
+.env.*
 *.key
+*.pem
+credentials.*
+secret.*
