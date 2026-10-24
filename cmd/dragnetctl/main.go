@@ -90,7 +90,8 @@ func selfTest() int {
 	defer func() { _ = eng.Close() }()
 
 	fail := 0
-	for _, c := range engine.SemanticCases() {
+	cases := engine.SemanticCases()
+	for _, c := range cases {
 		got := eng.Match(&engine.Request{Domain: c.Domain, DomainBasis: verdict.BasisDNS}).Action
 		status := "PASS"
 		if got != c.Want {
@@ -103,7 +104,7 @@ func selfTest() int {
 		fmt.Fprintf(os.Stderr, "自检失败：%d 条语义契约不满足\n", fail)
 		return 1
 	}
-	fmt.Println("语义契约自检全部通过（9/9）")
+	fmt.Printf("语义契约自检全部通过（%d/%d）\n", len(cases), len(cases))
 	return 0
 }
 

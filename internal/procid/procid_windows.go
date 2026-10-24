@@ -32,7 +32,7 @@ const (
 )
 
 var (
-	iphlpapi              = windows.NewLazySystemDLL("iphlpapi.dll")
+	iphlpapi                = windows.NewLazySystemDLL("iphlpapi.dll")
 	procGetExtendedTcpTable = iphlpapi.NewProc("GetExtendedTcpTable")
 	procGetExtendedUdpTable = iphlpapi.NewProc("GetExtendedUdpTable")
 )
@@ -135,8 +135,8 @@ func findOwner(tcp bool, local netip.AddrPort) (uint32, bool) {
 		r1, _, _ := getTable.Call(
 			uintptr(unsafe.Pointer(&buf[0])),
 			uintptr(unsafe.Pointer(&size)),
-			0,                 // bOrder: 返回已排序（可为 FALSE）
-			afInet,            // AF_INET
+			0,      // bOrder: 返回已排序（可为 FALSE）
+			afInet, // AF_INET
 			uintptr(tableClass),
 			0,
 		)

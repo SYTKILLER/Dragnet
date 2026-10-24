@@ -1,0 +1,53 @@
+! 罗网 Dragnet 内置种子规则 v1（保守起步集，详细拦截请加载外部订阅目录）
+! 语法：AdGuard/uBlock 网络规则（DNS 级子集）；! 开头为注释。
+! 原则：只收录长期稳定的广告/跟踪硬核域；宁可漏封不误封。
+
+! ---- Google 广告与跟踪 ----
+||doubleclick.net^
+||googlesyndication.com^
+||googletagservices.com^
+||googleadservices.com^
+||google-analytics.com^
+||googletagmanager.com^
+||admob.com^
+||adservice.google.com^
+||pagead2.googlesyndication.com^
+
+! ---- 通用大型广告网络 ----
+||adnxs.com^
+||adsrvr.org^
+||criteo.com^
+||criteo.net^
+||taboola.com^
+||outbrain.com^
+||pubmatic.com^
+||rubiconproject.com^
+||openx.net^
+||smartadserver.com^
+||adform.net^
+||yieldmo.com^
+||casalemedia.com^
+
+! ---- 常见跟踪/指纹 ----
+||scorecardresearch.com^
+||quantserve.com^
+||hotjar.com^
+||mouseflow.com^
+||fullstory.com^
+||clarity.ms^
+||branch.io^
+||appsflyer.com^
+||adjust.com^
+||kochava.com^
+
+! ---- 国内常见广告/统计 ----
+||umeng.com^
+||umeng.co^
+||growingio.com^
+||sensorsdata.cn^
+||tanx.com^
+||mmstat.com^
+
+! ---- 恶名域名（测试用假想条目，验收时用真实订阅对照）----
+||ads.example.com^
+||tracker.example.net^

@@ -26,17 +26,19 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
+	tun "github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common/buf"
 	"github.com/sagernet/sing/common/control"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
-	tun "github.com/sagernet/sing-tun"
 	"golang.org/x/net/dns/dnsmessage"
 	"golang.org/x/sys/windows"
 
+	"github.com/SYTKILLER/Dragnet/internal/blocklist"
 	"github.com/SYTKILLER/Dragnet/internal/engine"
 	"github.com/SYTKILLER/Dragnet/internal/ipcache"
 	"github.com/SYTKILLER/Dragnet/internal/procid"
@@ -65,13 +67,24 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	la := newLogAdapter(*verbose)
 
-	srcs, err := rules.SourcesFromDir(*lists)
-	must(err, "枚举规则目录")
+	// 规则：内置种子（开箱即用）+ 可选外部订阅目录（缺目录仅告警不失败）。
+	named := []engine.NamedRules{{Name: blocklist.StarterName, Text: blocklist.Starter()}}
+	if srcs, err := rules.SourcesFromDir(*lists); err == nil {
+		for _, s := range srcs {
+			if b, err := os.ReadFile(s.Path); err == nil {
+				named = append(named, engine.NamedRules{Name: s.Name, Text: string(b)})
+			} else {
+				la.Warn("跳过规则文件 ", s.Path, ": ", err)
+			}
+		}
+	} else {
+		la.Warn("外部订阅目录不可用（", err, "），仅使用内置种子规则")
+	}
 	var holder rules.Holder
-	must(holder.Load(srcs), "加载规则")
+	must(holder.LoadRules(named), "加载规则")
 	st := holder.Current().Stats()
-	log.Printf("规则引擎就绪: %d 个订阅, %d 行, 存储≈%.1fMB",
-		st.Lists, st.RuleLines, float64(st.StorageEstBytes)/1e6)
+	log.Printf("规则引擎就绪: 内置种子 %d 条 + %d 个订阅, 共 %d 行, 存储≈%.1fMB",
+		blocklist.Lines(), st.Lists-1, st.RuleLines, float64(st.StorageEstBytes)/1e6)
 
 	upAddr, err := netip.ParseAddrPort(*dnsUp)
 	must(err, "解析 -dns")
@@ -130,10 +143,32 @@ func main() {
 	must(stack.Start(), "启动栈")
 	log.Printf("罗网 TUN 上线: %s, MTU %d, 全局路由已接管；Ctrl+C 退出并自动清理", prefix, *mtu)
 
+	// 周期运行统计（M1 长稳验证用）。
+	done := make(chan struct{})
+	go func() {
+		start := time.Now()
+		t := time.NewTicker(time.Minute)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				log.Printf("运行统计: up=%s dns(阻断%d/转发%d) tcp(阻断%d/中继%d) udp(阻断%d/中继%d) 缓存%d条",
+					time.Since(start).Round(time.Second),
+					h.dnsBlocked.Load(), h.dnsForwarded.Load(),
+					h.tcpBlocked.Load(), h.tcpRelayed.Load(),
+					h.udpBlocked.Load(), h.udpRelayed.Load(),
+					h.cache.Len())
+			case <-done:
+				return
+			}
+		}
+	}()
+
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	<-sig
 
+	close(done)
 	log.Printf("正在退出…")
 	_ = stack.Close()
 	_ = dev.Close()
@@ -179,6 +214,22 @@ type handler struct {
 	dnsUp      netip.AddrPort
 	dnsTimeout time.Duration
 	log        *logAdapter
+
+	// 运行统计（长稳验证）。
+	dnsBlocked   atomic.Uint64
+	dnsForwarded atomic.Uint64
+	tcpBlocked   atomic.Uint64
+	tcpRelayed   atomic.Uint64
+	udpBlocked   atomic.Uint64
+	udpRelayed   atomic.Uint64
+}
+
+// recoverFlow 是 M1 长稳的 panic 边界：任何回调 panic 只断当前流，
+// 不允许击穿 sing-tun 回调线程拖垮整个进程。
+func (h *handler) recoverFlow(what string, src, dst any) {
+	if r := recover(); r != nil {
+		h.log.Error("panic(", what, " ", src, " -> ", dst, "): ", r, "（已隔离，进程继续）")
+	}
 }
 
 // JudgeFlow 在流建立时同步调用（TCP 首包前 / 每 UDP 会话首包，firstPacket
@@ -205,6 +256,8 @@ func (h *handler) NewDNSPacket(payload []byte, source, destination M.Socksaddr, 
 }
 
 func (h *handler) handleDNS(payload []byte, destination M.Socksaddr, writer N.PacketWriter) {
+	defer h.recoverFlow("dns", "-", destination)
+
 	write := func(data []byte) {
 		b := buf.NewSize(len(data))
 		if _, err := b.Write(data); err != nil {
@@ -227,21 +280,23 @@ func (h *handler) handleDNS(payload []byte, destination M.Socksaddr, writer N.Pa
 
 	res := h.match(qname, destination.AddrPort(), "")
 	if res.Action == verdict.ActionBlock {
+		h.dnsBlocked.Add(1)
 		h.log.Info("阻断 DNS ", qname, " ", ruleInfo(res))
 		resp := dnsmessage.Message{
-			ID:               query.ID,
-			Response:         true,
-			OpCode:           query.OpCode,
-			RecursionDesired: query.RecursionDesired,
+			ID:                 query.ID,
+			Response:           true,
+			OpCode:             query.OpCode,
+			RecursionDesired:   query.RecursionDesired,
 			RecursionAvailable: true,
-			RCode:            dnsmessage.RCodeNameError,
-			Questions:        query.Questions,
+			RCode:              dnsmessage.RCodeNameError,
+			Questions:          query.Questions,
 		}
 		if packed, err := resp.Pack(); err == nil {
 			write(packed)
 		}
 		return
 	}
+	h.dnsForwarded.Add(1)
 
 	respPayload, err := h.exchange(query.ID, payload)
 	if err != nil {
@@ -308,6 +363,7 @@ func binaryID(b []byte) uint16 { return uint16(b[0])<<8 | uint16(b[1]) }
 // NewConnectionEx 处理 TCP：先嗅探 SNI/HTTP Host（无缓存证据时的强证据），
 // 命中阻断则直接断开，否则绑定物理网卡中继。
 func (h *handler) NewConnectionEx(ctx context.Context, conn net.Conn, source, destination M.Socksaddr, onClose N.CloseHandlerFunc) {
+	defer h.recoverFlow("tcp", source, destination)
 	if onClose != nil {
 		defer onClose(nil)
 	}
@@ -332,10 +388,12 @@ func (h *handler) NewConnectionEx(ctx context.Context, conn net.Conn, source, de
 
 	res := h.match(domain, destination.AddrPort(), proc)
 	if res.Action == verdict.ActionBlock {
+		h.tcpBlocked.Add(1)
 		h.log.Info("阻断 TCP ", source, " -> ", destination,
 			" domain=", orNone(domain), " process=", orNone(proc), " ", ruleInfo(res))
 		return
 	}
+	h.tcpRelayed.Add(1)
 	if domain == "" {
 		h.log.Info("中继 TCP ", source, " -> ", destination, " （无域名证据）")
 	} else {
@@ -359,6 +417,7 @@ func (h *handler) NewConnectionEx(ctx context.Context, conn net.Conn, source, de
 // NewPacketConnectionEx 中继非 DNS 的 UDP 会话（如 QUIC）：域名证据只能
 // 来自缓存；无证据按 fail-open 放行。
 func (h *handler) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, source, destination M.Socksaddr, onClose N.CloseHandlerFunc) {
+	defer h.recoverFlow("udp", source, destination)
 	if onClose != nil {
 		defer onClose(nil)
 	}
@@ -366,9 +425,11 @@ func (h *handler) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, 
 
 	res := h.match(h.cache.Domain(destination.AddrPort().Addr(), time.Now()), destination.AddrPort(), h.proc.LookupUDP(source.AddrPort()))
 	if res.Action == verdict.ActionBlock {
+		h.udpBlocked.Add(1)
 		h.log.Info("阻断 UDP ", source, " -> ", destination, " ", ruleInfo(res))
 		return
 	}
+	h.udpRelayed.Add(1)
 
 	pc, err := h.listenCfg.ListenPacket(ctx, "udp", "0.0.0.0:0")
 	if err != nil {
@@ -425,11 +486,11 @@ func (h *handler) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, 
 
 func (h *handler) match(domain string, destination netip.AddrPort, process string) verdict.Result {
 	return h.holder.Match(&engine.Request{
-		Domain:     domain,
+		Domain:      domain,
 		DomainBasis: verdict.BasisDNS,
-		IP:         destination.Addr(),
-		Port:       destination.Port(),
-		Process:    process,
+		IP:          destination.Addr(),
+		Port:        destination.Port(),
+		Process:     process,
 	})
 }
 

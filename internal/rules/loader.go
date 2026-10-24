@@ -64,7 +64,14 @@ func (h *Holder) Load(srcs []Source) error {
 		}
 		named = append(named, engine.NamedRules{Name: name, Text: string(b)})
 	}
+	return h.LoadRules(named)
+}
 
+// LoadRules 从内存规则文本构建新引擎并原子切换（内置种子规则、C ABI 传入等）。
+func (h *Holder) LoadRules(named []engine.NamedRules) error {
+	if len(named) == 0 {
+		return fmt.Errorf("rules: 没有可加载的规则")
+	}
 	eng, err := engine.NewURLFilter(named)
 	if err != nil {
 		return err
