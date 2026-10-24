@@ -1,0 +1,5 @@
+# Android 壳工程本地构建产物
+.gradle/
+build/
+local.properties
+*.iml
