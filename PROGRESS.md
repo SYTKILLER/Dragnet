@@ -22,7 +22,7 @@
 
 ## 当前状态（更新于 2026-10-24）
 
-- 阶段：**M1 CLI MVP 代码侧基本就绪（dragnet-tun 六要素齐 + 内置规则 + 长稳加固），待测试机长稳验证；M0-3 测试集扩至 13 条全过。开发机下一步：Android VpnService 壳工程（P0-A 剩余）**
+- 阶段：**开发机侧待办全部完成，项目进入"测试进度阻塞"状态**：P0-W / P0-A（含 APK）/ M1 长稳 全部移交待测；测试机结果回写后解锁 M2 与后续
 - 决策状态：技术选型已批准（见下方基线摘要），无未决阻塞项；威胁模型开放问题见 docs/tech/04 §4
 
 ## 技术基线摘要（已批准，不可回退）
@@ -43,16 +43,16 @@
 | P0/M1 | D-1 核心契约包 verdict + engine 接口 | 📦 待测 | `go build ./...`；语义见 internal/verdict 包注释 |
 | P0 | D-2 urlfilter 适配器 + 规则加载器（原子切换骨架） | 📦 待测 | 已知 TODO：旧引擎关闭的 RCU 竞态窗口（代码内标注）；HostRule 命中信息暂缺 |
 | P0-R | D-3 rulebench 基准工具 | 📦 待测 | `bash scripts/fetch-rules.sh && go run ./cmd/rulebench -lists build/rules`；本机初值：3 表 27.7 万行，构建 950ms，堆 47.5MB，65k QPS |
-| M1 | D-4 dragnetctl demo CLI | 📦 待测 | `go run ./cmd/dragnetctl -lists build/rules -selftest`（9/9）；stdin 逐行域名→三值判定+命中回溯 |
+| M1 | D-4 dragnetctl demo CLI | 📦 待测 | `go run ./cmd/dragnetctl -lists build/rules -selftest`（13/13）；stdin 逐行域名→三值判定+命中回溯 |
 | P0-W | P0-W Windows TUN+进程识别 PoC | 📦 待测 | 编译过（需 `-tags with_gvisor`）；运行需管理员→测试机。清单见下方"移交测试清单" |
-| P0-A | P0-A Android VpnService 最小链路 | 📦 编译件待测 | `bash scripts/build-android.sh` 产出 arm64-v8a/x86_64 libdragnet.so（导出 DragnetLoadRules/MatchDetail/FreeString 已核）；VpnService 壳工程未开始；真机→测试机 |
+| P0-A | P0-A Android VpnService 最小链路 | 📦 待测 | **壳工程+内核齐**：`bash scripts/build-android.sh` → `cd android && gradle assembleDebug`（Gradle 8.13+JBR21 实测通过，APK 22.4MB 双 ABI）→ adb install；验证清单见 android/README.md；真机→测试机 |
 | P0-H | P0-H 鸿蒙最小链路 | 🔶 缺签名 | DevEco 就绪；需华为账号+证书；go-ohos 工具链待取 |
 | M0 | M0-1 规则支持矩阵 | 🔧 初稿已落地 | 处置口径固化在 internal/engine/urlfilter.go 注释 + semantic.go 夹具；定稿待真实订阅逐类核对统计 |
 | M0 | M0-2 威胁模型 | 🔧 初稿已落地 | 源机器 docs/tech/04-threat-model.md（不入库）：5 资产/4 边界/威胁表+4 个开放问题；开放问题 1（DoH 旁路对策）待讨论 |
 | M0 | M0-3 Verdict 契约 + 一致性测试集 | 🔧 测试集扩充完成 | `go test ./...` 语义契约 13/13（三 realm/双 hosts/路径与改写忽略/归一化/反向 important 例外）；夹具可复用于换引擎验收；定稿待真实订阅逐类核对 |
 | M1 | Windows CLI MVP（docs/tech/03 §8） | 🔧 代码侧就绪 | dragnet-tun 已覆盖出口标准六要素（DNS 劫持/真实IP映射/SNI 嗅探/urlfilter/REJECT/命中日志）+ 内置种子规则 + panic 边界 + 分钟级运行统计；**长稳运行→测试机** |
 
-demo 范围（本轮开发机目标）：D-1~D-4 + P0-W PoC 代码（编译件）+ P0-A .so 编译件，测试机接手做全部运行验证。
+demo 范围（开发机已全部交付）：D-1~D-4 + P0-W + P0-A（壳工程与 APK 构建）+ M1 代码侧；测试机接手做全部运行验证（P0-W 清单见上，P0-A 清单见 android/README.md）。
 
 ### P0-W 移交测试清单（测试机执行，需管理员）
 
@@ -75,6 +75,7 @@ go build -tags with_gvisor -o build/dragnet-tun.exe ./cmd/dragnet-tun
 | 工具 | 状态 | 位置/版本 |
 |---|---|---|
 | Go | ✅ | C:\Data\tools\go（1.27.3；PATH 在 ~/.bashrc；GOPROXY=goproxy.cn，GOSUMDB=sum.golang.google.cn） |
+| Gradle | ✅ | C:\Data\tools\gradle-8.13（直连下载成功；Java 用 DevEco JBR：JAVA_HOME 指向 jbr） |
 | Android SDK | ✅ | C:\Data\tools\android-sdk（cmdline-tools + platform-tools r37.0.1 + NDK 30.0.16248370 + platforms;android-36；sdkmanager 的 Java 用 DevEco JBR：`JAVA_HOME='C:\Program Files\Huawei\DevEco Studio\jbr'` + `_JAVA_OPTIONS` 走 7890） |
 | DevEco Studio | ✅ | 6.1.1.300（自带 OHOS SDK/hdc/模拟器；hdc 在 sdk/default/openharmony/toolchains/） |
 | Flutter | ➖ 未装 | M3 再装；P0/M1 不需要 |
@@ -84,6 +85,7 @@ go build -tags with_gvisor -o build/dragnet-tun.exe ./cmd/dragnet-tun
 
 ## 更新日志
 
+- 2026-10-24（六）：P0-A 完成（开发机侧）：架构重构抽出 internal/tunstack 平台无关处理链（Windows CLI 与 Android 内核共用，两端语义一致）；cmd/dragnetvpn Android 内核（JNI：VpnService fd + protect 防回环 + 全套规则 C ABI 导出，dragnetlib 并入）；android/ 薄壳工程（VpnService+程序化 UI，零第三方依赖）；本机 Gradle 8.13+JBR21 assembleDebug 实测通过，APK 22.4MB 双 ABI。全量回归：build（默认+with_gvisor）+vet+test 4 包 + 自检 13/13。**开发机待办清空，阻塞于测试进度**。
 - 2026-10-24（五）：M1 代码侧收口：dragnet-tun 内置种子规则（internal/blocklist，go:embed 开箱即用，无订阅目录也可运行）+ 长稳加固（DNS/TCP/UDP 全部回调加 panic 边界，分钟级运行统计：dns/tcp/udp 阻断与中继计数、缓存规模）；M0-3 语义测试集 9→13 条（反向 important 例外、v6 hosts、$dnsrewrite 忽略、大写+尾点归一化），自检输出改动态计数。`go build`（默认+with_gvisor）+`go vet`+`go test` 全过，自检 13/13。规则加载器抽出 LoadRules 内存入口（C ABI 与内置规则共用）。
 - 2026-10-24（四）：P0-W 完成（dragnet-tun：sing-tun gVisor 栈 + JudgeFlow 流级阻断 + DNS 劫持 NXDOMAIN + SNI/HTTP Host 嗅探 + ipcache 有界 IP↔域名缓存 + iphlpapi 进程反查，出站绑定物理网卡防回环）；P0-A 编译件完成（dragnetlib C ABI：线程/所有权/崩溃契约，scripts/build-android.sh 产出 arm64-v8a+x86_64 .so，导出已用 llvm-nm 核对）；M0-2 威胁模型初稿（docs/tech/04，源机器）。`go build`（默认+with_gvisor tag）+`go vet`+`go test` 全过；无管理员冒烟：规则加载与出站网卡判定正常，卡 TUN 创建（符合预期）。语义自检 9/9。
 - 2026-10-24（三）：D-1~D-4 完成（verdict 契约包 / engine 接口 / urlfilter 适配器 / 原子切换加载器 / rulebench / dragnetctl / fetch-rules 脚本 / 语义测试集）。`go build`+`go vet`+`go test` 全过；本机零特权冒烟：3 表 27.7 万行构建 950ms、堆 47.5MB、65k QPS、语义自检 9/9。待测试机复核基准与长期运行。
