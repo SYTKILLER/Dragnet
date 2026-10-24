@@ -22,8 +22,8 @@
 
 ## 当前状态（更新于 2026-10-24）
 
-- 阶段：**D-1~D-4 已完成并移交待测（demo 核心链路通）；下一步 P0-W TUN PoC 编码 + Android .so 交叉编译 + M0-2 威胁模型**
-- 决策状态：技术选型已批准（见下方基线摘要），无未决阻塞项
+- 阶段：**P0-W 与 P0-A 编码完成并移交待测（TUN PoC + Android .so 编译件）；下一步测试机跑 P0-W/P0-A 清单，开发机备选 M0-3 一致性测试集扩充或 M1 Windows CLI MVP 启动**
+- 决策状态：技术选型已批准（见下方基线摘要），无未决阻塞项；威胁模型开放问题见 docs/tech/04 §4
 
 ## 技术基线摘要（已批准，不可回退）
 
@@ -44,15 +44,31 @@
 | P0 | D-2 urlfilter 适配器 + 规则加载器（原子切换骨架） | 📦 待测 | 已知 TODO：旧引擎关闭的 RCU 竞态窗口（代码内标注）；HostRule 命中信息暂缺 |
 | P0-R | D-3 rulebench 基准工具 | 📦 待测 | `bash scripts/fetch-rules.sh && go run ./cmd/rulebench -lists build/rules`；本机初值：3 表 27.7 万行，构建 950ms，堆 47.5MB，65k QPS |
 | M1 | D-4 dragnetctl demo CLI | 📦 待测 | `go run ./cmd/dragnetctl -lists build/rules -selftest`（9/9）；stdin 逐行域名→三值判定+命中回溯 |
-| P0-W | P0-W Windows TUN+进程识别 PoC | ⬜ | 开发机编码+编译（sing-tun，build tag windows）；**运行需管理员→测试机执行** |
-| P0-A | P0-A Android VpnService 最小链路 | 🔶 缺真机 | SDK+NDK 就绪；开发机可先交叉编译 .so；真机运行→测试机 |
+| P0-W | P0-W Windows TUN+进程识别 PoC | 📦 待测 | 编译过（需 `-tags with_gvisor`）；运行需管理员→测试机。清单见下方"移交测试清单" |
+| P0-A | P0-A Android VpnService 最小链路 | 📦 编译件待测 | `bash scripts/build-android.sh` 产出 arm64-v8a/x86_64 libdragnet.so（导出 DragnetLoadRules/MatchDetail/FreeString 已核）；VpnService 壳工程未开始；真机→测试机 |
 | P0-H | P0-H 鸿蒙最小链路 | 🔶 缺签名 | DevEco 就绪；需华为账号+证书；go-ohos 工具链待取 |
 | M0 | M0-1 规则支持矩阵 | 🔧 初稿已落地 | 处置口径固化在 internal/engine/urlfilter.go 注释 + semantic.go 夹具；定稿待真实订阅逐类核对统计 |
-| M0 | M0-2 威胁模型 | ⬜ | |
+| M0 | M0-2 威胁模型 | 🔧 初稿已落地 | 源机器 docs/tech/04-threat-model.md（不入库）：5 资产/4 边界/威胁表+4 个开放问题；开放问题 1（DoH 旁路对策）待讨论 |
 | M0 | M0-3 Verdict 契约 + 一致性测试集 | 📦 种子完成 | `go test ./...` 语义契约 9/9（三 realm/hosts/路径忽略/归一化）；夹具可复用于换引擎验收 |
 | M1+ | Windows CLI MVP → 后续 | ⬜ | 见源机器 docs/tech/03 §8 |
 
-demo 范围（本轮开发机目标）：D-1~D-4 + P0-W PoC 代码（编译件），测试机接手做全部运行验证。
+demo 范围（本轮开发机目标）：D-1~D-4 + P0-W PoC 代码（编译件）+ P0-A .so 编译件，测试机接手做全部运行验证。
+
+### P0-W 移交测试清单（测试机执行，需管理员）
+
+```bash
+go build ./... && go vet ./... && go test ./...        # 1) 干净基线
+go build -tags with_gvisor -o build/dragnet-tun.exe ./cmd/dragnet-tun
+# 管理员终端运行（先 bash scripts/fetch-rules.sh 拉规则）：
+./build/dragnet-tun.exe -lists build/rules             # 2) 默认劫持系统 DNS+全局路由
+# 3) 预期：日志出现"出站绑定: <物理网卡>"；浏览器打开含广告站点：
+#    - 命中广告域名 → "阻断 DNS ..."（NXDOMAIN）或 "阻断 TCP ..."（SNI）
+#    - 普通站点正常出网；nslookup 广告域名返回 NXDOMAIN
+# 4) Ctrl+C 退出后：系统 DNS/路由恢复，普通网站可达
+# 5) 回写：阻断/漏封样本各记几条（域名+命中规则），核对阻断日志行包含 process=（进程识别证据）
+```
+
+已知风险（代码内 TODO 标注）：TCP 握手跨分段时 SNI 可能嗅探不到（放行）；PID 表端口字节序按网络序解析待真机核对；UDP DNS 劫持依赖 sing-tun HijackDNS 路径（两条路径均接，实测为准）。
 
 ## 开发环境（源机器 C:\Data\Dragnet，Windows 11 x64）
 
@@ -68,6 +84,7 @@ demo 范围（本轮开发机目标）：D-1~D-4 + P0-W PoC 代码（编译件�
 
 ## 更新日志
 
+- 2026-10-24（四）：P0-W 完成（dragnet-tun：sing-tun gVisor 栈 + JudgeFlow 流级阻断 + DNS 劫持 NXDOMAIN + SNI/HTTP Host 嗅探 + ipcache 有界 IP↔域名缓存 + iphlpapi 进程反查，出站绑定物理网卡防回环）；P0-A 编译件完成（dragnetlib C ABI：线程/所有权/崩溃契约，scripts/build-android.sh 产出 arm64-v8a+x86_64 .so，导出已用 llvm-nm 核对）；M0-2 威胁模型初稿（docs/tech/04，源机器）。`go build`（默认+with_gvisor tag）+`go vet`+`go test` 全过；无管理员冒烟：规则加载与出站网卡判定正常，卡 TUN 创建（符合预期）。语义自检 9/9。
 - 2026-10-24（三）：D-1~D-4 完成（verdict 契约包 / engine 接口 / urlfilter 适配器 / 原子切换加载器 / rulebench / dragnetctl / fetch-rules 脚本 / 语义测试集）。`go build`+`go vet`+`go test` 全过；本机零特权冒烟：3 表 27.7 万行构建 950ms、堆 47.5MB、65k QPS、语义自检 9/9。待测试机复核基准与长期运行。
 - 2026-10-24（二）：确立双机工作流（开发机=编译通过即验收，测试机=运行调试）；demo 范围定为 D-1~D-4+P0-W 编译件；开工 D-1/D-2/D-3/D-4。
 - 2026-10-24（一）：技术选型批准并经评审修订（过程见源机器 docs/tech/01-03）；建立本看板；源机器完成环境准备（Go/Android SDK/DevEco）。
