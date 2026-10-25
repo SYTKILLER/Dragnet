@@ -24,7 +24,7 @@
 
 ## 当前状态（更新于 2026-10-25，测试机）
 
-- 阶段：**测试机首轮验证+修复完成；P0-A 构建侧+模拟器全链路验证通过**：D-1~D-4 全部通过；P0-W 清单 1/2/4/5 项通过，修复 3 个内核缺陷+新增启动清缓存；P0-A 在 AVD 模拟器（虚拟设备，零接触宿主机网络）跑通 android/README 全部 4 项。**P0-W 第 3 项（Windows NXDOMAIN 终验）与 M1 30 分钟长稳仍需 Windows 环境——按网络规程禁止在宿主机跑，待 Windows VM 方案确认**（见下方"测试机网络规程"与"Windows VM 待确认"）
+- 阶段：**测试机首轮验证+修复完成；P0-A 全链路 + M1 内核长稳 均在虚拟设备（AVD 模拟器）验证通过**：D-1~D-4 全过；P0-W 清单 1/2/4/5 项宿主机通过（禁令下达前），修复 3 个内核缺陷+新增启动清缓存；P0-A android/README 4/4 项模拟器全过；M1 长稳（共享 tunstack+gVisor 内核）模拟器 15min 浸泡通过（socket fd=12/线程=29 证明会话释放、零崩溃）。**仅剩 Windows 专属项**：P0-W 第 3 项 Windows NXDOMAIN 终验 + 多 DNS 竞速取证 + Windows CLI 本体长稳——按规程禁止宿主机跑，待 Windows VM（QEMU 已装，需 ISO）
 - 决策状态：技术选型已批准（见下方基线摘要），无未决阻塞项；威胁模型开放问题见 docs/tech/04 §4（round4 实测确认 DoT:853 同样可旁路 DNS 级拦截，与开放问题 1 的 DoH 同类）
 - ⚠️ 未决疑点（Windows 侧，round5 中断前发现）：系统缓存已清后，nslookup 查询 GFW 毒化广告域（pagead2/doubleclick/google-analytics）仍瞬时得到 0.0.0.0/:: 且内核判定日志无记录。**Android 模拟器交叉印证：同一 pagead2 经同一 tunstack 内核正确 NXDOMAIN 阻断（list=dragnet-starter）→ 强证据表明此为 Windows 宿主机环境特有、非内核 bug**。假说：Win11 dnsapi 对多 DNS 服务器（TUN 的 172.19.0.2 与物理网卡的 192.168.1.1）并发竞速、路由器毒化应答先到，查询未独家进内核。需 Windows VM 内取证（-v 判定日志+抓包）后定修复方案（候选：AutoRoute 期间改写物理网卡 DNS，或核查 StrictRoute 是否真的封住了明文 53 旁路）
 
@@ -53,7 +53,7 @@
 | M0 | M0-1 规则支持矩阵 | 🔧 初稿已落地 | 处置口径固化在 internal/engine/urlfilter.go 注释 + semantic.go 夹具；定稿待真实订阅逐类核对统计 |
 | M0 | M0-2 威胁模型 | 🔧 初稿已落地 | 源机器 docs/tech/04-threat-model.md（不入库）：5 资产/4 边界/威胁表+4 个开放问题；开放问题 1（DoH 旁路对策）待讨论；测试机 round4 实测：DoT:853 同样旁路 DNS 级拦截（SNI 可嗅到部分如 dot.pub，查询内容不可见） |
 | M0 | M0-3 Verdict 契约 + 一致性测试集 | 🔧 测试集扩充完成 | `go test ./...` 语义契约 13/13（测试机复核通过）；夹具可复用于换引擎验收；定稿待真实订阅逐类核对 |
-| M1 | Windows CLI MVP（docs/tech/03 §8） | 🔶 长稳待授权 | dragnet-tun 六要素实测全通（DNS 劫持/真实IP映射/SNI 嗅探/urlfilter/REJECT/命中日志含 process=）；泄漏修复后 3 分钟采样内存趋平（~2.26GB，量级偏大待浸泡确认）；30min 长稳浸泡按用户要求暂停 |
+| M1 | Windows CLI MVP（docs/tech/03 §8） | ✅ 内核长稳通过（模拟器）/ Windows CLI 本体待 VM | dragnet-tun 六要素宿主机实测全通（DNS 劫持/真实IP映射/SNI 嗅探/urlfilter/REJECT/命中日志含 process=）。**泄漏修复长稳已在 AVD 模拟器实证（共享同一 tunstack+gVisor 内核）**：15min 持续 UDP/TCP/DNS 负载下 Native Heap 持平、TOTAL PSS 收敛稳态、停负载后 socket fd=12/线程=29（会话确实释放，非泄漏）、零 panic、功能不退化。证据见"M1 长稳验证记录"。Windows CLI 本体 30min 浸泡待 Windows VM |
 
 demo 范围（开发机已全部交付）：D-1~D-4 + P0-W + P0-A（壳工程与 APK 构建）+ M1 代码侧；测试机接手做全部运行验证（P0-W 清单见上，P0-A 清单见 android/README.md）。
 
@@ -96,6 +96,8 @@ go build -tags with_gvisor -o build/dragnet-tun.exe ./cmd/dragnet-tun
 
 **P0-A 模拟器验证记录（2026-10-25，虚拟设备，零接触宿主机网络）**：AVD `dragnet`（system-images;android-34;google_apis;x86_64，WHPX 加速，`-no-window` headless，user-mode NAT 不改宿主机路由/DNS）。工具链：官方源钉 IP（dl.google.com→180.163.150.161）手动下载 emulator 37.3.5 + sys-img（补齐 sdkmanager 需要的 emulator/package.xml）。android/README.md 4 项逐条通过：①`adb install -r` Success→点"启动拦截"→系统 VPN 授权对话框点 OK；②logcat(tag=Dragnet) `罗网内核上线: fd=103 mtu=1500 dns=223.5.5.5:53` + `nativeStartVpn(...) = 0`；③`ping doubleclick.net/pagead2.googlesyndication.com/www.google-analytics.com`→全部 `unknown host`（NXDOMAIN），内核日志 `阻断 DNS <域名> rule=||…^ list=dragnet-starter`；对照 `ping www.baidu.com`(110.242.69.21)/`www.googleapis.com`(172.217.119.4) 正常解析+ICMP 通，GMS 后台流量大量 `中继 TCP … domain=…` 带 SNI 证据；④点"停止拦截"→`nativeStopVpn = 0`，VPN NetworkAgent 消失、回到 eth0/10.0.2.15 普通网络。**结论：P0-A 最小链路在虚拟设备端到端跑通；同一 tunstack 内核 DNS/SNI/规则三值判定与 Windows 侧语义一致（架构"两端一致"要求实证）**。注：壳仅加载内置种子（40 条），外部订阅 DragnetLoadRules 未接（PoC 范围，与看板已知限制一致）。真机（物理手机）验证仍可选补充，但功能已由模拟器覆盖。
 
+**M1 长稳验证记录（2026-10-25，AVD 模拟器，虚拟设备）**：cmd/dragnetvpn 与 Windows dragnet-tun **共用同一 `tun.NewStack("gvisor")` + `internal/tunstack` + `UDPTimeout=5min`**（仅 Bind=protect / TUN=VpnService fd / 无 ProcessLookup 三处平台差异），故长稳可在模拟器等效验证共享内核。方法：VPN 上线后持续 15min 打流（`nc -u` 打静默端点 ~10 UDP 会话/秒精确复现 NewPacketConnectionEx 泄漏路径 + TCP 中继 + DNS 阻断/放行混合；负载确经内核：DNS 阻断 141→1965、TCP 中继 180→2284）。结果：①Native Heap PSS 全程持平（13768→13792KB，24KB 波动）；②TOTAL PSS 恒定负载下收敛到稳态——增量 79.6→35~40→8 MB/90s，末端 ~558MB 趋平（饱和曲线，非线性暴涨）；③**决定性证据：停负载后 `run-as`/root 读 app 进程 socket fd=12（含 1 个 /dev/tun）、线程=29、fd 总=128**——泄漏则数千会话必滞留数千 socket fd 并钉住等量 M 线程，实测均为低位稳态，证明 UDP/TCP 会话被正确释放（tunstack 修复生效）；④15min 零 panic/error/崩溃，负载后功能不退化（doubleclick 仍 NXDOMAIN、baidu 正常解析、nativeStopVpn=0）。对比修复前 Windows round1 恒定线性 1.88→3.36GB 不收敛。说明：停负载后 PSS 不回落属 Go MADV_FREE 惰性归还（页已逻辑释放、无内存压力不被内核回收，仍计入 PSS），非会话滞留——fd/socket/线程回落低位已证真实资源释放。**结论：internal/tunstack 泄漏修复（UDP 关双端解阻塞、TCP 半关闭+30s 宽限）实证有效；M1 长稳（无泄漏/无崩溃/功能稳定）在虚拟设备通过。** Windows CLI 本体 30min 浸泡（含 wintun+iphlpapi+全量 277k 规则）仍待 Windows VM。
+
 ## 开发环境（源机器 C:\Data\Dragnet，Windows 11 x64）
 
 | 工具 | 状态 | 位置/版本 |
@@ -111,6 +113,7 @@ go build -tags with_gvisor -o build/dragnet-tun.exe ./cmd/dragnet-tun
 
 ## 更新日志
 
+- 2026-10-25（测试机，第四次回写）：**M1 长稳在 AVD 模拟器验证通过**（虚拟设备，零接触宿主机网络）。因 cmd/dragnetvpn 与 Windows dragnet-tun 共用同一 gVisor 栈+internal/tunstack，长稳可等效验证共享内核：VPN 上线后 15min 持续打流（nc -u ~10 UDP 会话/秒复现泄漏路径 + TCP + DNS），Native Heap 持平、TOTAL PSS 收敛稳态（~558MB）、**停负载后 socket fd=12/线程=29/fd 总=128（会话确实释放，铁证泄漏修复生效）**、15min 零 panic、功能不退化、nativeStopVpn=0。对比修复前 Windows round1 线性涨 3.4GB 不收敛。至此 P0-A（4/4）+ M1 内核长稳 全部在虚拟设备通过；剩 Windows 专属项（P0-W 第3项 NXDOMAIN 终验+多DNS取证+Windows CLI 本体长稳）待 Windows VM（QEMU 10.1 已装，本机无 ISO，需 ~6GB 官方 ISO 下载，待用户确认是否进行）。模拟器用完即 `adb emu kill` 关闭。
 - 2026-10-25（测试机，第三次回写）：用户升级网络规程为**绝对禁令**（宿主机禁止任何 TUN/路由/DNS 接管；允许虚拟设备）→ 已写入记忆与看板并推送（e252e3b）。改走**虚拟设备**完成 P0-A 真机验证：装 Android emulator 37.3.5 + sys-img API34 google_apis x86_64（官方源钉 IP 180.163.150.161 手动布局，补 emulator/package.xml），建 AVD `dragnet`（WHPX 加速 headless，user-mode NAT 不碰宿主机网络）。android/README 4 项全过：nativeStartVpn=0+内核上线、广告域 NXDOMAIN（doubleclick/pagead2/google-analytics 命中 dragnet-starter）+正常域解析通、nativeStopVpn=0+网络恢复。**关键交叉印证：Windows 侧"漏封"的 pagead2 在模拟器经同一 tunstack 内核正确阻断 → 确认该异常为宿主机环境特有（Win11 多 DNS 竞速假说），非内核 bug**。P0-A 状态 🔶→✅。模拟器用完即 `adb emu kill` 关闭。遗留：P0-W 第 3 项 Windows NXDOMAIN 终验 + M1 30min 长稳仍需 Windows 环境，按规程不在宿主机跑——待确认 Windows VM 方案（QEMU 已装，需 Windows ISO；或 Hyper-V）。
 - 2026-10-25（测试机，第二次回写）：P0-A 构建侧在测试机复现通过：官方源钉 IP（dl.google.com 本机 DNS 给的 CDN 节点不通，改 --resolve 180.163.150.161）下载 NDK r30/platform-36/build-tools 35+36/platform-tools r37.0.1/cmdline-tools（布局 C:\Users\sytki\tools\android-sdk，licenses 已写入）+ Gradle 8.13（直连 services.gradle.org）；build-android.sh 交叉编译双 ABI .so（llvm-nm 核对 Dragnet*3+Java_*3 导出）；gradle assembleDebug（JDK17 + 用户级 init 脚本注入 aliyun google/public 镜像，不改仓库文件）1m02s 成功，APK 22.4MB，lib/{arm64-v8a,x86_64}/libdragnet.so 与修复版字节一致。真机验证 🔶（无手机；本机 DevEco 鸿蒙模拟器非 AOSP 不可用）。round5（NXDOMAIN 终验+30min 长稳）被用户叫停：确立"测试机授权规程"（接管网络必须先征得同意）；中断后已全面核验网络恢复（无进程/无适配器/路由 DNS 复原/外网通）。round5 中断前数据：内核启动自动清缓存日志确认生效；毒化广告域 0.0.0.0 应答疑点未决（见"当前状态"⚠️）。.gitignore 补充 .gradle/、local.properties。
 - 2026-10-25（测试机）：首轮验证完成：基线（build/vet/test/with_gvisor）全绿；rulebench 3 表 27.7 万行构建 226ms/堆 47.9MB/33-36 万 QPS；dragnetctl 13/13+stdin 冒烟过。P0-W round1-4（UAC 提权自动化脚本）：清单 1/2/4/5 项通过，DNS/SNI/进程识别/清理恢复全实证；修复 3 内核缺陷（DNS payload use-after-free 同步拷贝、UDP 会话泄漏 ≈500MB/min、TCP relay 滞留）+ 启动刷新系统 DNS 缓存（DnsFlushResolverCache）+ DNS 判定 Debug 日志（-v）；"pagead2 漏封"定性为 Windows DNS 缓存假象（非 bug，黑洞服务器实验实锤），测试规程补 flushdns。gofmt 全净（顺手修了 main.go 一处 import 序）。待办：round5 NXDOMAIN 终验+30min 长稳；P0-A 工具链搭建中（无真机 🔶）。
