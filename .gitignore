@@ -69,6 +69,8 @@ tmp/
 .idea/
 .vscode/
 *.iml
+.gradle/
+local.properties
 
 # --- 敏感信息 ---
 .env
