@@ -28,8 +28,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sagernet/sing/common/control"
 	tun "github.com/sagernet/sing-tun"
+	"github.com/sagernet/sing/common/control"
 	"golang.org/x/sys/windows"
 
 	"github.com/SYTKILLER/Dragnet/internal/blocklist"
@@ -92,6 +92,7 @@ func main() {
 	log.Printf("出站绑定: %s", describeInterface(bindIndex))
 
 	procs := procid.NewCache()
+	flushDNSCache(la)
 	h := tunstack.New(tunstack.Config{
 		Holder:     &holder,
 		Cache:      ipcache.New(ipcache.DefaultCapacity, ipcache.DefaultTTL),
@@ -192,6 +193,19 @@ func describeInterface(index int) string {
 		return fmt.Sprintf("%s (index %d)", nif.Name, index)
 	}
 	return fmt.Sprintf("index %d", index)
+}
+
+// flushDNSCache 启动时清空 Windows DNS 客户端缓存：此前解析过的广告域名
+// 会留在系统缓存里（含 ISP 毒化应答），TUN 上线后应用/nslookup 直接命中缓存、
+// 查询包根本不进内核，DNS 级拦截被绕过（测试机 P0-W round4 实测定位）。
+// SNI 嗅探仍兜底 TLS 连接，但缓存清理是必要卫生。
+func flushDNSCache(la *logAdapter) {
+	ret, _, err := windows.NewLazySystemDLL("dnsapi.dll").NewProc("DnsFlushResolverCache").Call()
+	if ret != 0 {
+		log.Printf("已刷新系统 DNS 缓存（防旧缓存绕过 DNS 级拦截）")
+	} else {
+		la.Warn("刷新系统 DNS 缓存失败: ", err)
+	}
 }
 
 func must(err error, what string) {

@@ -12,6 +12,7 @@ package tunstack
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
@@ -20,11 +21,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	tun "github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common/buf"
 	"github.com/sagernet/sing/common/control"
 	M "github.com/sagernet/sing/common/metadata"
 	N "github.com/sagernet/sing/common/network"
-	tun "github.com/sagernet/sing-tun"
 	"golang.org/x/net/dns/dnsmessage"
 
 	"github.com/SYTKILLER/Dragnet/internal/engine"
@@ -57,6 +58,7 @@ type Config struct {
 
 // Logger 是本包日志依赖的最小接口（sing logger.Logger 的子集）。
 type Logger interface {
+	Debug(args ...any)
 	Info(args ...any)
 	Warn(args ...any)
 	Error(args ...any)
@@ -127,11 +129,18 @@ func (h *Handler) JudgeFlow(network uint8, source, destination netip.AddrPort, f
 }
 
 // NewDNSPacket 处理被劫持的 DNS 查询。转发循环内同步调用，必须异步处理。
+//
+// 注意：payload 是 sing-tun/gVisor 内部包缓冲的视图（stack_gvisor_udp.go 的
+// view.AsSlice），回调返回后栈即回收并复用该内存。异步处理前必须同步拷贝，
+// 否则 goroutine 读到被覆写的数据——表现为随机"DNS 解析失败"、误判转发
+// （测试机 P0-W round1/2 实测：阻断域名被放行，上游毒化应答被中继）。
 func (h *Handler) NewDNSPacket(payload []byte, source, destination M.Socksaddr, writer N.PacketWriter) {
-	go h.handleDNS(payload, destination, writer)
+	data := make([]byte, len(payload))
+	copy(data, payload)
+	go h.handleDNS(data, source, destination, writer)
 }
 
-func (h *Handler) handleDNS(payload []byte, destination M.Socksaddr, writer N.PacketWriter) {
+func (h *Handler) handleDNS(payload []byte, source, destination M.Socksaddr, writer N.PacketWriter) {
 	defer h.recoverFlow("dns", "-", destination)
 
 	write := func(data []byte) {
@@ -146,7 +155,10 @@ func (h *Handler) handleDNS(payload []byte, destination M.Socksaddr, writer N.Pa
 
 	var query dnsmessage.Message
 	if err := query.Unpack(payload); err != nil {
-		h.cfg.Log.Warn("DNS 解析失败: ", err)
+		// 拷贝修复后仍出现的解析失败即真实畸形报文，留头部十六进制定位来源。
+		n := min(len(payload), 48)
+		h.cfg.Log.Warn("DNS 解析失败: ", err, " src=", source, " dst=", destination,
+			" len=", len(payload), " head=", hex.EncodeToString(payload[:n]))
 		return
 	}
 	if query.Response || len(query.Questions) == 0 {
@@ -155,6 +167,7 @@ func (h *Handler) handleDNS(payload []byte, destination M.Socksaddr, writer N.Pa
 	qname := strings.TrimSuffix(strings.ToLower(query.Questions[0].Name.String()), ".")
 
 	res := h.match(qname, destination.AddrPort(), "")
+	h.cfg.Log.Debug("DNS 判定 qname=", qname, " action=", res.Action, " list=", res.List, " dst=", destination)
 	if res.Action == verdict.ActionBlock {
 		h.stats.dnsBlocked.Add(1)
 		h.cfg.Log.Info("阻断 DNS ", qname, " ", ruleInfo(res))
@@ -365,6 +378,12 @@ func (h *Handler) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, 
 		}
 	}()
 	<-done
+	// 任一方向终结即会话已死：立即关闭两端套接字解除另一方向的阻塞。
+	// 此前等待双方自然结束——服务器静默+客户端已亡时 pc.ReadFrom 永久阻塞，
+	// 每条会话泄漏 socket+2 goroutine+64KB 缓冲（测试机 round1 实测 5 分钟
+	// 工作集涨到 3.4GB，UDP 中继约 7200 条/分钟）。
+	pc.Close()
+	conn.Close()
 	<-done
 }
 
@@ -418,11 +437,32 @@ func orNone(s string) string {
 	return s
 }
 
-// relay 双向拷贝直到任一方结束。
+// relayDrainTimeout 是客户端发完后的半关闭宽限：等待服务器剩余应答的上限，
+// 超时即强制关闭，防止静默对端把会话与 goroutine 永久挂住。
+const relayDrainTimeout = 30 * time.Second
+
+// relay 双向拷贝（a=客户端侧 gVisor 连接，b=出站真实连接）。
+// 服务器方向先结束视为事务完成，立即关双端；客户端方向先结束则半关闭出站
+// （FIN 但保留读），宽限期内收完剩余应答，超时强制回收——此前无限等待双方
+// 结束，静默对端会造成与 UDP 同类的会话滞留。
 func relay(a, b net.Conn) {
-	done := make(chan struct{}, 2)
-	go func() { io.Copy(a, b); done <- struct{}{} }()
-	go func() { io.Copy(b, a); done <- struct{}{} }()
-	<-done
-	<-done
+	s2c := make(chan struct{}) // b → a
+	c2s := make(chan struct{}) // a → b
+	go func() { defer close(s2c); io.Copy(a, b) }()
+	go func() { defer close(c2s); io.Copy(b, a) }()
+	select {
+	case <-s2c:
+	case <-c2s:
+		if cw, ok := b.(interface{ CloseWrite() error }); ok {
+			_ = cw.CloseWrite()
+		}
+		select {
+		case <-s2c:
+		case <-time.After(relayDrainTimeout):
+		}
+	}
+	a.Close()
+	b.Close()
+	<-s2c
+	<-c2s
 }
