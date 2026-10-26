@@ -18,11 +18,15 @@ Gradle/AGP 走代理时在命令行追加：
 
 ## 验证（真机/模拟器）
 
-1. 安装启动，点"启动拦截"→ 授权 VPN。
+1. 安装启动，点"启动拦截"→ 授权 VPN；通知栏出现"罗网 · 拦截运行中"（前台服务）。
 2. `adb logcat -s Dragnet` 应出现 `nativeStartVpn(...) = 0` 与内核"上线"日志。
 3. 浏览器访问 `doubleclick.net` 等种子规则域名 → 请求失败（DNS NXDOMAIN）；
    普通网站正常；`logcat` 出现"阻断 DNS ..."。
-4. 点"停止拦截"→ `nativeStopVpn = 0`，网络恢复正常。
+4. 点"停止拦截"→ `nativeStopVpn = 0`，网络恢复正常，通知消失。
+5. （M2）外部订阅：`adb push anti-AD.txt /data/local/tmp/ && adb shell run-as
+   com.dragnet.app mkdir -p files/rules && adb shell run-as com.dragnet.app cp
+   /data/local/tmp/anti-AD.txt files/rules/`，重启拦截，logcat 确认
+   `nativeLoadRules = 0`；点"运行统计"按钮可见 JSON 计数。
 
-已知限制（PoC 范围）：仅 IPv4；规则=内置种子（外部订阅走 DragnetLoadRules，
-壳未接）；无通知栏服务（targetSdk 29 下可接受，息屏可能被杀——长稳在 M2 验证）。
+已知限制（PoC 范围）：仅 IPv4；外部订阅为手动 push（订阅下载 M3）；Windows
+侧 DNS 接管修复对应本壳无感（Android 查询天然独占进 TUN）。

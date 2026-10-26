@@ -22,11 +22,11 @@
 
 **测试机网络规程（2026-10-25 用户指示，长期有效，已升级为绝对禁令）**：**绝对禁止在宿主机运行任何会建 TUN/改全局路由/改系统 DNS 的测试**（即使提权、即使短暂）。此类验证一律放进虚拟设备——Android 用 emulator（AVD），Windows/Linux 用 VM（本机有 QEMU、WSL2-Ubuntu，HypervisorPresent=True 支持 WHPX）；虚拟设备内的 TUN/路由/DNS 接管允许，因为不触碰宿主机网络栈。普通应用级下载（curl/sdkmanager/gradle 拉包）不算接管，可正常进行。若历史上曾在宿主机运行，须核验恢复五项（无 dragnet-tun 进程、无 Dragnet 适配器、路由表无 172.19 条目、系统 DNS 回物理网卡、外网连通）。
 
-## 当前状态（更新于 2026-10-25，测试机）
+## 当前状态（更新于 2026-10-27，开发机）
 
-- 阶段：**测试机首轮验证+修复完成；P0-A 全链路 + M1 内核长稳 均在虚拟设备（AVD 模拟器）验证通过**：D-1~D-4 全过；P0-W 清单 1/2/4/5 项宿主机通过（禁令下达前），修复 3 个内核缺陷+新增启动清缓存；P0-A android/README 4/4 项模拟器全过；M1 长稳（共享 tunstack+gVisor 内核）模拟器 15min 浸泡通过（socket fd=12/线程=29 证明会话释放、零崩溃）。**仅剩 Windows 专属项**：P0-W 第 3 项 Windows NXDOMAIN 终验 + 多 DNS 竞速取证 + Windows CLI 本体长稳——按规程禁止宿主机跑，待 Windows VM（QEMU 已装，需 ISO）
-- 决策状态：技术选型已批准（见下方基线摘要），无未决阻塞项；威胁模型开放问题见 docs/tech/04 §4（round4 实测确认 DoT:853 同样可旁路 DNS 级拦截，与开放问题 1 的 DoH 同类）
-- ⚠️ 未决疑点（Windows 侧，round5 中断前发现）：系统缓存已清后，nslookup 查询 GFW 毒化广告域（pagead2/doubleclick/google-analytics）仍瞬时得到 0.0.0.0/:: 且内核判定日志无记录。**Android 模拟器交叉印证：同一 pagead2 经同一 tunstack 内核正确 NXDOMAIN 阻断（list=dragnet-starter）→ 强证据表明此为 Windows 宿主机环境特有、非内核 bug**。假说：Win11 dnsapi 对多 DNS 服务器（TUN 的 172.19.0.2 与物理网卡的 192.168.1.1）并发竞速、路由器毒化应答先到，查询未独家进内核。需 Windows VM 内取证（-v 判定日志+抓包）后定修复方案（候选：AutoRoute 期间改写物理网卡 DNS，或核查 StrictRoute 是否真的封住了明文 53 旁路）
+- 阶段：**用户确认本机无法负担 Windows VM**。开发机据此把 round5 疑点转为代码级根因修复（DNS 接管，见 P0-W 行）并完成 M2 代码侧。剩余验证需求收敛为：①模拟器可做的（M2 清单）→ 测试机 AVD 复测；②必须 Windows 网络隔离环境的（P0-W 终验+CLI 长稳）→ 等测试机授权窗口或具备 VM 条件的设备；不阻塞后续编码（M3 订阅+GUI）。
+- 决策状态：技术选型已批准（见下方基线摘要），无未决阻塞项；威胁模型开放问题见 docs/tech/04 §4（round4 实测确认 DoT:853 同样可旁路 DNS 级拦截，与开放问题 1 的 DoH 同类；DNS 接管落地后旁路面收窄为加密 DNS）
+- ⚠️→🔧 round5 疑点处置（2026-10-27）：多 DNS 竞速假说不再依赖 VM 取证先行——已按标准做法实现 DNS 接管（物理适配器 DNS → TUN DNS，快照/还原齐全），从根上消除明文 53 旁路；若复测仍有异常再回到取证路径
 
 ## 技术基线摘要（已批准，不可回退）
 
@@ -47,13 +47,14 @@
 | P0 | D-2 urlfilter 适配器 + 规则加载器（原子切换骨架） | ✅ 测试机验证通过 | 已知 TODO：旧引擎关闭的 RCU 竞态窗口（代码内标注）；HostRule 命中信息暂缺 |
 | P0-R | D-3 rulebench 基准工具 | ✅ 测试机复核通过 | 测试机 3 表 277,089 行：构建 221-234ms、堆 47.9MB、33-36 万 QPS（约 5 倍于开发机，符合高性能设备预期）。🔴 问题（环境）：anti-ad.net 直连被 Cloudflare 限速（30s 仅 18KB），fetch-rules.sh 拉不动；测试机以 docs/rules/anti-AD/adguard.txt 官方副本替代（与在线源同物，行数吻合）。建议脚本注明可用本地副本 |
 | M1 | D-4 dragnetctl demo CLI | ✅ 测试机验证通过 | selftest 13/13；stdin 冒烟：4 广告域 BLOCK（含 list/rule/basis 回溯）、2 正常域 NOMATCH |
-| P0-W | P0-W Windows TUN+进程识别 PoC | 🔶 终验待授权 | 清单 1/2/4/5 项通过（证据见下方"测试机验证记录"）；修复 3 缺陷+1 卫生项（见 🔴 记录）；第 3 项 NXDOMAIN 终验 round5 中断（用户叫停网络接管），遗留疑点见"当前状态"⚠️ |
+| P0-W | P0-W Windows TUN+进程识别 PoC | 🔶 终验待授权 | 清单 1/2/4/5 项通过（证据见下方"测试机验证记录"）；修复 3 缺陷+1 卫生项（见 🔴 记录）；第 3 项 NXDOMAIN 终验 round5 中断（用户叫停网络接管），遗留疑点见"当前状态"⚠️。**根因修复（2026-10-27 开发机）：DNS 接管已实现**——启动时把所有带 DNS 的物理适配器指向 TUN 内置 DNS（windns 快照/SetInterfaceDnsSettings/退出还原，-no-dns-takeover 可关），消除多 DNS 竞速旁路窗口；待测试机在授权窗口/VM 复测 round5 场景 |
 | P0-A | P0-A Android VpnService 最小链路 | ✅ 测试机通过（构建+模拟器全链路） | 构建侧：NDK r30 交叉编译 .so（导出 6 符号核对）→ Gradle 8.13+JDK17 assembleDebug 1m02s → APK 22.4MB 双 ABI。**模拟器实机验证（AVD API34 google_apis x86_64，WHPX，headless）4/4 项全过**：nativeStartVpn=0+内核上线；广告域 NXDOMAIN（阻断 DNS doubleclick/pagead2/google-analytics，命中 list=dragnet-starter）+正常域解析通（baidu/googleapis ping 通）；nativeStopVpn=0+VPN 断开网络恢复。证据见下方"P0-A 模拟器验证记录" |
 | P0-H | P0-H 鸿蒙最小链路 | 🔶 缺签名 | DevEco 就绪；需华为账号+证书；go-ohos 工具链待取 |
 | M0 | M0-1 规则支持矩阵 | 🔧 初稿已落地 | 处置口径固化在 internal/engine/urlfilter.go 注释 + semantic.go 夹具；定稿待真实订阅逐类核对统计 |
 | M0 | M0-2 威胁模型 | 🔧 初稿已落地 | 源机器 docs/tech/04-threat-model.md（不入库）：5 资产/4 边界/威胁表+4 个开放问题；开放问题 1（DoH 旁路对策）待讨论；测试机 round4 实测：DoT:853 同样旁路 DNS 级拦截（SNI 可嗅到部分如 dot.pub，查询内容不可见） |
 | M0 | M0-3 Verdict 契约 + 一致性测试集 | 🔧 测试集扩充完成 | `go test ./...` 语义契约 13/13（测试机复核通过）；夹具可复用于换引擎验收；定稿待真实订阅逐类核对 |
-| M1 | Windows CLI MVP（docs/tech/03 §8） | ✅ 内核长稳通过（模拟器）/ Windows CLI 本体待 VM | dragnet-tun 六要素宿主机实测全通（DNS 劫持/真实IP映射/SNI 嗅探/urlfilter/REJECT/命中日志含 process=）。**泄漏修复长稳已在 AVD 模拟器实证（共享同一 tunstack+gVisor 内核）**：15min 持续 UDP/TCP/DNS 负载下 Native Heap 持平、TOTAL PSS 收敛稳态、停负载后 socket fd=12/线程=29（会话确实释放，非泄漏）、零 panic、功能不退化。证据见"M1 长稳验证记录"。Windows CLI 本体 30min 浸泡待 Windows VM |
+| M1 | Windows CLI MVP（docs/tech/03 §8） | ✅ 内核长稳通过（模拟器）/ Windows CLI 本体待 VM | dragnet-tun 六要素宿主机实测全通（DNS 劫持/真实IP映射/SNI 嗅探/urlfilter/REJECT/命中日志含 process=）。**泄漏修复长稳已在 AVD 模拟器实证（共享同一 tunstack+gVisor 内核）**：15min 持续 UDP/TCP/DNS 负载下 Native Heap 持平、TOTAL PSS 收敛稳态、停负载后 socket fd=12/线程=29（会话确实释放，非泄漏）、零 panic、功能不退化。证据见"M1 长稳验证记录"。Windows CLI 本体 30min 浸泡待授权窗口 |
+| M2 | Android 核心薄切片（docs/tech/03 §8） | 🔧 代码侧就绪 | 在 P0-A 最小链路之上：外部订阅接入（filesDir/rules → nativeLoadRules，失败回退种子）、前台服务通知保活、运行统计导出（nativeStats JSON + UI 展示）；`bash scripts/build-android.sh && cd android && gradle assembleDebug` 实测通过；验证清单 android/README.md 第 5 步；模拟器/真机→测试机 |
 
 demo 范围（开发机已全部交付）：D-1~D-4 + P0-W + P0-A（壳工程与 APK 构建）+ M1 代码侧；测试机接手做全部运行验证（P0-W 清单见上，P0-A 清单见 android/README.md）。
 
@@ -112,6 +113,8 @@ go build -tags with_gvisor -o build/dragnet-tun.exe ./cmd/dragnet-tun
 其他设备首次接力：装 Go（≥1.27）→ clone 本仓库 → `bash scripts/fetch-rules.sh`（拉规则集，可配代理）→ 读本文件按看板认领。移动端另需 Android 工具链与 DevEco Studio（华为官网；非大陆 IP 签名会被屏蔽）。
 
 ## 更新日志
+
+- 2026-10-27（开发机）：①round5 疑点转根因修复：新增 internal/windns（GetAdaptersAddresses 快照 + iphlpapi.SetInterfaceDnsSettings，只动 NameServer 不碰搜索域），dragnet-tun 启动时把所有带 DNS 的物理适配器指向 TUN 内置 DNS（v6 同时清空防旁路），退出还原 + 二次 flushdns；`-no-dns-takeover` 诊断开关。②M2 代码侧：dragnetvpn 新增 nativeLoadRules（filesDir/rules 外部订阅，失败回退种子）与 nativeStats（运行统计 JSON）导出（8 符号 llvm-nm 核对）；壳工程前台服务通知保活、UI 统计按钮；android/README 验证清单更新至 5 步。APK 重新构建实测通过（22.4MB）。Go 全量回归 + 自检 13/13。
 
 - 2026-10-25（测试机，第四次回写）：**M1 长稳在 AVD 模拟器验证通过**（虚拟设备，零接触宿主机网络）。因 cmd/dragnetvpn 与 Windows dragnet-tun 共用同一 gVisor 栈+internal/tunstack，长稳可等效验证共享内核：VPN 上线后 15min 持续打流（nc -u ~10 UDP 会话/秒复现泄漏路径 + TCP + DNS），Native Heap 持平、TOTAL PSS 收敛稳态（~558MB）、**停负载后 socket fd=12/线程=29/fd 总=128（会话确实释放，铁证泄漏修复生效）**、15min 零 panic、功能不退化、nativeStopVpn=0。对比修复前 Windows round1 线性涨 3.4GB 不收敛。至此 P0-A（4/4）+ M1 内核长稳 全部在虚拟设备通过；剩 Windows 专属项（P0-W 第3项 NXDOMAIN 终验+多DNS取证+Windows CLI 本体长稳）待 Windows VM（QEMU 10.1 已装，本机无 ISO，需 ~6GB 官方 ISO 下载，待用户确认是否进行）。模拟器用完即 `adb emu kill` 关闭。
 - 2026-10-25（测试机，第三次回写）：用户升级网络规程为**绝对禁令**（宿主机禁止任何 TUN/路由/DNS 接管；允许虚拟设备）→ 已写入记忆与看板并推送（e252e3b）。改走**虚拟设备**完成 P0-A 真机验证：装 Android emulator 37.3.5 + sys-img API34 google_apis x86_64（官方源钉 IP 180.163.150.161 手动布局，补 emulator/package.xml），建 AVD `dragnet`（WHPX 加速 headless，user-mode NAT 不碰宿主机网络）。android/README 4 项全过：nativeStartVpn=0+内核上线、广告域 NXDOMAIN（doubleclick/pagead2/google-analytics 命中 dragnet-starter）+正常域解析通、nativeStopVpn=0+网络恢复。**关键交叉印证：Windows 侧"漏封"的 pagead2 在模拟器经同一 tunstack 内核正确阻断 → 确认该异常为宿主机环境特有（Win11 多 DNS 竞速假说），非内核 bug**。P0-A 状态 🔶→✅。模拟器用完即 `adb emu kill` 关闭。遗留：P0-W 第 3 项 Windows NXDOMAIN 终验 + M1 30min 长稳仍需 Windows 环境，按规程不在宿主机跑——待确认 Windows VM 方案（QEMU 已装，需 Windows ISO；或 Hyper-V）。

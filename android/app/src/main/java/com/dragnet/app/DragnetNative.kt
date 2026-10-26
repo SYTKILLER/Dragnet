@@ -19,4 +19,13 @@ object DragnetNative {
     external fun nativeStartVpn(fd: Int, dnsUp: String, mtu: Int): Int
 
     external fun nativeStopVpn(): Int
+
+    /**
+     * 从目录加载外部订阅规则（filesDir/rules 目录下的 txt 文件），0 成功；
+     * 失败保留原引擎。须在 nativeStartVpn 之前调用；不调用则用内置种子规则。
+     */
+    external fun nativeLoadRules(dir: String): Int
+
+    /** 运行统计 JSON；未运行返回 null。 */
+    external fun nativeStats(): String?
 }

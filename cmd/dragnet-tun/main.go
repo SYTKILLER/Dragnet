@@ -38,6 +38,7 @@ import (
 	"github.com/SYTKILLER/Dragnet/internal/procid"
 	"github.com/SYTKILLER/Dragnet/internal/rules"
 	"github.com/SYTKILLER/Dragnet/internal/tunstack"
+	"github.com/SYTKILLER/Dragnet/internal/windns"
 )
 
 func main() {
@@ -48,6 +49,7 @@ func main() {
 	ifaceName := flag.String("iface", "", "出站绑定的物理网卡名；缺省自动取默认路由网卡（TUN 建立前判定）")
 	dnsUp := flag.String("dns", "223.5.5.5:53", "上游 DNS")
 	dnsTimeout := flag.Duration("dns-timeout", 3*time.Second, "上游 DNS 超时")
+	noDNSTakeover := flag.Bool("no-dns-takeover", false, "禁用 DNS 接管（诊断用；毒化应答可旁路）")
 	verbose := flag.Bool("v", false, "打印 sing-tun 内部调试日志")
 	flag.Parse()
 
@@ -136,6 +138,19 @@ func main() {
 	must(stack.Start(), "启动栈")
 	log.Printf("罗网 TUN 上线: %s, MTU %d, 全局路由已接管；Ctrl+C 退出并自动清理", prefix, *mtu)
 
+	// DNS 接管（多 DNS 竞速根因修复，round5 疑点）：把所有带 DNS 的物理适配器
+	// 指向 TUN 内置 DNS，消除"查询旁路直奔物理网卡 DNS"的竞速窗口。退出时还原。
+	var dnsSaved []windns.Snapshot
+	if *noDNSTakeover {
+		la.Warn("已按 -no-dns-takeover 跳过 DNS 接管（仅供诊断，毒化应答可旁路拦截）")
+	} else {
+		tunDNS, err := options.Inet4DNSAddress()
+		if err == nil && len(tunDNS) > 0 {
+			dnsSaved = takeoverDNS(tunDNS[0], *tunName, la)
+			_ = windnsFlush() // 接管后立即清缓存，旧毒化记录全部失效
+		}
+	}
+
 	// 周期运行统计（M1 长稳验证用）。
 	done := make(chan struct{})
 	go func() {
@@ -164,9 +179,59 @@ func main() {
 	log.Printf("正在退出…")
 	_ = stack.Close()
 	_ = dev.Close()
+	if len(dnsSaved) > 0 {
+		restoreDNS(dnsSaved, la)
+		_ = windnsFlush()
+	}
 	_ = ifaceMon.Close()
 	_ = netMon.Close()
-	log.Printf("已清理（TUN 适配器与 WFP 规则随进程结束移除）")
+	log.Printf("已清理（TUN 适配器、WFP 规则与系统 DNS 随进程结束还原）")
+}
+
+// takeoverDNS 快照并接管所有带 DNS 的物理适配器（指向 tunDNS）。
+// 逐适配器容错：单个失败只告警，其余继续。
+func takeoverDNS(tunDNS netip.Addr, tunName string, la *logAdapter) []windns.Snapshot {
+	saved, err := windns.SnapshotAdapters(tunName)
+	if err != nil {
+		la.Warn("DNS 快照失败，跳过接管: ", err)
+		return nil
+	}
+	var applied []windns.Snapshot
+	for _, s := range saved {
+		g := s.GUID
+		if err := windns.SetDNS(&g, windows.AF_INET, []netip.Addr{tunDNS}); err != nil {
+			la.Warn("接管 ", s.Name, " IPv4 DNS 失败: ", err)
+			continue
+		}
+		if err := windns.SetDNS(&g, windows.AF_INET6, nil); err != nil {
+			la.Warn("接管 ", s.Name, " IPv6 DNS 失败（v4 已接管）: ", err)
+		}
+		applied = append(applied, s)
+	}
+	if len(applied) > 0 {
+		log.Printf("DNS 已接管: %d 个适配器 → %s（退出时还原原配置）", len(applied), tunDNS)
+	} else {
+		la.Warn("没有适配器被接管（无已配置 DNS 的物理适配器？）")
+	}
+	return applied
+}
+
+// restoreDNS 把快照的原始 DNS 配置写回各适配器。
+func restoreDNS(saved []windns.Snapshot, la *logAdapter) {
+	for _, s := range saved {
+		g := s.GUID
+		if err := windns.SetDNS(&g, windows.AF_INET, s.V4); err != nil {
+			la.Warn("还原 ", s.Name, " IPv4 DNS 失败: ", err)
+		}
+		if err := windns.SetDNS(&g, windows.AF_INET6, s.V6); err != nil {
+			la.Warn("还原 ", s.Name, " IPv6 DNS 失败: ", err)
+		}
+	}
+	log.Printf("系统 DNS 已还原（%d 个适配器）", len(saved))
+}
+
+func windnsFlush() error {
+	return windns.FlushResolverCache()
 }
 
 // pickBindIndex 选出站物理网卡：显式 -iface 优先；否则在 TUN 建立前用

@@ -10,7 +10,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 
 /**
- * 程序化 UI（无 res 依赖）：授权 → 启动/停止 VpnService。
+ * 程序化 UI（无 res 依赖）：授权 → 启动/停止 VpnService，可查看运行统计。
  */
 class MainActivity : Activity() {
 
@@ -27,7 +27,7 @@ class MainActivity : Activity() {
         }
 
         status = TextView(this).apply {
-            text = "罗网 · Android 最小链路 PoC\n未运行"
+            text = "罗网 · Android 核心薄切片\n未运行"
             gravity = Gravity.CENTER
         }
 
@@ -39,12 +39,20 @@ class MainActivity : Activity() {
             text = "停止拦截"
             setOnClickListener {
                 startService(vpnIntent(DragnetVpnService.ACTION_STOP))
+                status.text = "已停止"
+            }
+        }
+        val statsBtn = Button(this).apply {
+            text = "运行统计"
+            setOnClickListener {
+                status.text = DragnetNative.nativeStats()?.replace(",", "\n") ?: "未运行"
             }
         }
 
         root.addView(status)
         root.addView(startBtn)
         root.addView(stopBtn)
+        root.addView(statsBtn)
         setContentView(root)
     }
 

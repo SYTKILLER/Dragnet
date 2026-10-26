@@ -56,6 +56,9 @@ static char *dg_jstr(JNIEnv *env, jstring s) {
 static void dg_release_jstr(JNIEnv *env, jstring s, const char *c) {
 	if (s != NULL && c != NULL) (*env)->ReleaseStringUTFChars(env, s, c);
 }
+static jstring dg_new_jstr(JNIEnv *env, const char *c) {
+	return c == NULL ? NULL : (*env)->NewStringUTF(env, c);
+}
 */
 import "C"
 
@@ -92,6 +95,8 @@ var (
 	runMu    sync.Mutex
 	runStack tun.Stack
 	runDev   tun.Tun
+	runStart time.Time
+	runStats *tunstack.Handler
 )
 
 // ---- JNI 入口（对应 Kotlin DragnetNative）----
@@ -121,6 +126,51 @@ func Java_com_dragnet_app_DragnetNative_nativeStartVpn(env *C.JNIEnv, thiz C.job
 func Java_com_dragnet_app_DragnetNative_nativeStopVpn(env *C.JNIEnv, thiz C.jobject) (rc C.jint) {
 	defer recoverJNI(&rc)
 	return C.jint(stopVPN())
+}
+
+// nativeLoadRules 从目录加载外部订阅规则（filesDir/rules/*.txt），0 成功。
+// 须在 nativeStartVpn 之前调用；加载失败时保留原引擎（内置种子）。
+//
+//export Java_com_dragnet_app_DragnetNative_nativeLoadRules
+func Java_com_dragnet_app_DragnetNative_nativeLoadRules(env *C.JNIEnv, thiz C.jobject, dir C.jstring) (rc C.jint) {
+	defer recoverJNI(&rc)
+	cs := C.dg_jstr(env, dir)
+	defer C.dg_release_jstr(env, dir, cs)
+	if cs == nil {
+		return -1
+	}
+	srcs, err := rules.SourcesFromDir(C.GoString(cs))
+	if err != nil {
+		return -2
+	}
+	if err := holder.Load(srcs); err != nil {
+		return -3
+	}
+	return 0
+}
+
+// nativeStats 返回运行统计 JSON（未运行返回 null）。
+//
+//export Java_com_dragnet_app_DragnetNative_nativeStats
+func Java_com_dragnet_app_DragnetNative_nativeStats(env *C.JNIEnv, thiz C.jobject) (rs C.jstring) {
+	defer recoverStats(&rs)
+	runMu.Lock()
+	h := runStats
+	start := runStart
+	runMu.Unlock()
+	if h == nil {
+		var jnil C.jstring
+		return jnil
+	}
+	s := h.Snapshot()
+	// JSON 数字字段手动拼装，避免引入 encoding/json 体积
+	json := fmt.Sprintf(
+		`{"uptime_sec":%d,"dns_blocked":%d,"dns_forwarded":%d,"tcp_blocked":%d,"tcp_relayed":%d,"udp_blocked":%d,"udp_relayed":%d,"cache":%d}`,
+		int(time.Since(start).Seconds()),
+		s.DNSBlocked, s.DNSForwarded, s.TCPBlocked, s.TCPRelayed, s.UDPBlocked, s.UDPRelayed, s.CacheLen)
+	cs := C.CString(json)
+	defer C.free(unsafe.Pointer(cs))
+	return C.dg_new_jstr(env, cs)
 }
 
 // ---- 规则匹配 C ABI（与 JNI 共存，供测试与未来 NAPI 复用）----
@@ -240,7 +290,8 @@ func startVPN(fd int, dnsUp string, mtu int) int {
 	if err := stack.Start(); err != nil {
 		return -17
 	}
-	runDev, runStack = dev, stack
+	runDev, runStack, runStats = dev, stack, h
+	runStart = time.Now()
 	alog.Info("罗网内核上线: fd=", fd, " mtu=", mtu, " dns=", dnsUp)
 	return 0
 }
@@ -253,7 +304,7 @@ func stopVPN() int {
 	}
 	err := runStack.Close()
 	_ = runDev.Close()
-	runStack, runDev = nil, nil
+	runStack, runDev, runStats = nil, nil, nil
 	if err != nil {
 		return -1
 	}
@@ -284,6 +335,15 @@ func recoverJNI(out *C.jint) {
 	if r := recover(); r != nil {
 		_ = r
 		*out = -99
+	}
+}
+
+// recoverStats 是返回 jstring 的导出函数的崩溃边界（返回 null 而非错误码）。
+func recoverStats(out *C.jstring) {
+	if r := recover(); r != nil {
+		_ = r
+		var jnil C.jstring
+		*out = jnil
 	}
 }
 
