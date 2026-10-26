@@ -18,6 +18,7 @@ import (
 
 	"github.com/SYTKILLER/Dragnet/internal/engine"
 	"github.com/SYTKILLER/Dragnet/internal/rules"
+	"github.com/SYTKILLER/Dragnet/internal/subscribe"
 	"github.com/SYTKILLER/Dragnet/internal/verdict"
 )
 
@@ -25,10 +26,16 @@ func main() {
 	listsDir := flag.String("lists", "build/rules", "规则目录（.txt）")
 	domain := flag.String("domain", "", "查询单个域名；缺省读 stdin")
 	selftest := flag.Bool("selftest", false, "运行内置语义契约自检（不加载订阅）")
+	subConfig := flag.String("subscribe-config", "build/subscribe.json", "订阅配置（缺文件用内置三源）")
+	update := flag.Bool("update", false, "一次性更新订阅到 -lists 目录后退出")
 	flag.Parse()
 
 	if *selftest {
 		os.Exit(selfTest())
+	}
+
+	if *update {
+		os.Exit(updateRules(*listsDir, *subConfig))
 	}
 
 	srcs, err := rules.SourcesFromDir(*listsDir)
@@ -54,6 +61,39 @@ func main() {
 	}
 	must(sc.Err())
 }
+
+// updateRules 一次性订阅更新（M3 条件更新）后退出。返回进程退出码。
+func updateRules(listsDir, subConfig string) int {
+	cfg, err := subscribe.LoadConfig(subConfig)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "dragnetctl:", err)
+		return 1
+	}
+	if err := os.MkdirAll(listsDir, 0o755); err != nil {
+		fmt.Fprintln(os.Stderr, "dragnetctl:", err)
+		return 1
+	}
+	var h rules.Holder
+	m := subscribe.NewManager(listsDir, cfg, func() error {
+		srcs, err := rules.SourcesFromDir(listsDir)
+		if err != nil {
+			return err
+		}
+		return h.Load(srcs)
+	}, updateLogger{})
+	res := m.RefreshOnce()
+	fmt.Printf("订阅更新: 更新 %d / 跳过 %d / 失败 %d\n", res.Updated, res.Skipped, res.Failed)
+	if res.Failed > 0 {
+		return 1
+	}
+	return 0
+}
+
+type updateLogger struct{}
+
+func (updateLogger) Info(args ...any)  { fmt.Println(append([]any{"[INFO]"}, args...)...) }
+func (updateLogger) Warn(args ...any)  { fmt.Println("[WARN]", fmt.Sprint(args...)) }
+func (updateLogger) Error(args ...any) { fmt.Fprintln(os.Stderr, "[ERROR]", fmt.Sprint(args...)) }
 
 func sourceNames(srcs []rules.Source) []string {
 	names := make([]string, 0, len(srcs))

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"net/netip"
 	"os"
 	"os/signal"
@@ -37,6 +38,7 @@ import (
 	"github.com/SYTKILLER/Dragnet/internal/ipcache"
 	"github.com/SYTKILLER/Dragnet/internal/procid"
 	"github.com/SYTKILLER/Dragnet/internal/rules"
+	"github.com/SYTKILLER/Dragnet/internal/subscribe"
 	"github.com/SYTKILLER/Dragnet/internal/tunstack"
 	"github.com/SYTKILLER/Dragnet/internal/windns"
 )
@@ -51,6 +53,7 @@ func main() {
 	dnsTimeout := flag.Duration("dns-timeout", 3*time.Second, "上游 DNS 超时")
 	noDNSTakeover := flag.Bool("no-dns-takeover", false, "禁用 DNS 接管（诊断用；毒化应答可旁路）")
 	verbose := flag.Bool("v", false, "打印 sing-tun 内部调试日志")
+	subConfig := flag.String("subscribe", "", "订阅配置 JSON（设置后按周期后台条件更新并热切换；缺省关闭）")
 	flag.Parse()
 
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
@@ -170,6 +173,32 @@ func main() {
 			}
 		}
 	}()
+
+	// 后台订阅刷新（M3 条件更新）：出站 HTTP 也绑定物理网卡，避免经 TUN 绕一圈。
+	if *subConfig != "" {
+		cfg, err := subscribe.LoadConfig(*subConfig)
+		if err != nil {
+			la.Warn("订阅配置无效，后台刷新停用: ", err)
+		} else {
+			mgr := subscribe.NewManager(*lists, cfg, func() error {
+				named := []engine.NamedRules{{Name: blocklist.StarterName, Text: blocklist.Starter()}}
+				if srcs, err := rules.SourcesFromDir(*lists); err == nil {
+					for _, s := range srcs {
+						if b, err := os.ReadFile(s.Path); err == nil {
+							named = append(named, engine.NamedRules{Name: s.Name, Text: string(b)})
+						}
+					}
+				}
+				return holder.LoadRules(named)
+			}, la)
+			mgr.SetClient(&http.Client{
+				Timeout:   60 * time.Second,
+				Transport: &http.Transport{Proxy: http.ProxyFromEnvironment, DialContext: (&net.Dialer{Timeout: 30 * time.Second, Control: bind}).DialContext},
+			})
+			go mgr.Run()
+			log.Printf("后台订阅刷新已启用: %d 源, 间隔 %s", len(cfg.Sources), mgr.Interval())
+		}
+	}
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
