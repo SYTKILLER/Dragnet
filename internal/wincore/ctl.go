@@ -1,9 +1,12 @@
 //go:build windows
 
-// 控制面（M3）：IPC Handler 实现 + 阻断事件环形缓冲 + 白名单文件热切换。
+// Package wincore 是罗网内核的 Windows 共享装配层：控制台 CLI（cmd/dragnet-tun）
+// 与 Windows 服务（cmd/dragnetd）共用的 runCore、控制面（IPC Handler、阻断
+// 事件环形缓冲、白名单热切换）与系统 DNS 接管。
+//
 // 白名单文件位于规则目录（zzz-user-allow.txt，@@||domain^$important 形态），
 // 由规则加载器随目录一起加载，$important 保证压过订阅中的普通阻断。
-package main
+package wincore
 
 import (
 	"bufio"
