@@ -24,7 +24,8 @@
 
 ## 当前状态（更新于 2026-10-27，开发机）
 
-- 阶段：**M3 订阅条件更新代码侧完成（开发机实网冒烟通过）；M2/M3 待测试机在虚拟设备复核。剩余验证需求：①模拟器可做（M2 清单+订阅热切换）→ 测试机 AVD；②Windows 网络隔离环境（P0-W 终验+CLI 长稳+DNS 接管复测）→ 测试机授权窗口或 VM。不阻塞 M3 GUI（服务化+IPC）编码**
+- **追加计划 M4 已立项（2026-10-27，基于 android-ad-cleaner 调研吸收，六项见看板 M4 行）**。规则可见性检查结论：订阅目录/用户白名单/订阅落盘/Android 端规则均为外部可见文件，合规；**唯一违规：internal/blocklist/starter.txt 经 go:embed 内嵌二进制（dragnet-tun/wincore/dragnetvpn 三处引用，缺目录时静默回退种子），整改列为 M4-R1 最高优先**（需在 GUI/安装包成型前完成）。测试夹具（semantic.go、rulebench）属测试数据豁免。调研详情见源机器 docs/research/05（不入库）
+- 阶段：**M3 订阅条件更新代码侧完成（开发机实网冒烟通过）；M2/M3 待测试机在虚拟设备复核。M2/M3 待测试机在虚拟设备复核。剩余验证需求：①模拟器可做（M2 清单+订阅热切换）→ 测试机 AVD；②Windows 网络隔离环境（P0-W 终验+CLI 长稳+DNS 接管复测）→ 测试机授权窗口或 VM。不阻塞 M3 GUI（服务化+IPC）编码**
 - 决策状态：技术选型已批准（见下方基线摘要），无未决阻塞项；威胁模型开放问题见 docs/tech/04 §4（round4 实测确认 DoT:853 同样可旁路 DNS 级拦截，与开放问题 1 的 DoH 同类；DNS 接管落地后旁路面收窄为加密 DNS）
 - ⚠️→🔧 round5 疑点处置（2026-10-27）：多 DNS 竞速假说不再依赖 VM 取证先行——已按标准做法实现 DNS 接管（物理适配器 DNS → TUN DNS，快照/还原齐全），从根上消除明文 53 旁路；若复测仍有异常再回到取证路径
 
@@ -58,8 +59,27 @@
 | M3 | 订阅条件更新（docs/tech/03 §8） | 🔧 代码侧就绪 | internal/subscribe：ETag/If-Modified-Since 条件请求、体积/行数校验（T4.3 防炸弹）、>50% 收缩告警（T4.1）、同目录临时文件+原子改名落盘、meta sidecar、热切换回调；dragnetctl `-update` 一次性更新；dragnet-tun `-subscribe <cfg.json>` 后台周期刷新（出站绑定物理网卡）。单测 4 个（httptest 条件闭环/校验拒绝/原子替换/缺省回退）+ 实网冒烟（AWAvenue 200+ETag 落盘 976 行成功；anti-AD 限速/hagezi 本机 IPv6 不通属环境因素） |
 | M3 | 控制面：本机 IPC + 白名单 + 回溯 | 🔧 代码侧就绪 | internal/ipc 命名管道（DACL=SYSTEM+Admins+当前用户、对端进程校验只放行罗网组件、v1 版本化 JSON 协议、4KB 行长上限）；tunstack 三处阻断路径加 OnBlocked→256 条环形缓冲；白名单 zzz-user-allow.txt（@@…$important）随目录加载、IPC 变更即热切换；dragnet-tun 默认开（-no-ipc 可关）；dragnetctl `-pipe status\|blocks\|allow\|deny\|allowlist`。**管道往返本机无特权单测实测通过**（功能 4 例+协议防护 4 例）；提权端到端（服务+真客户端）→ 测试机 |
 | M3 | Windows GUI（Flutter 壳 + 服务化+回滚+UWP 豁免） | ⬜ | 控制面/订阅面已就绪为组件；dragnetd 服务化与 GUI 主体待排期 |
+| M4 | R1 种子规则出二进制（规则可见性合规整改） | ⬜ | **M4 最高优先，需在 GUI/安装包成型前完成**。移除 internal/blocklist go:embed，种子改为随分发包的普通规则文件（安装目录 rules/ 或 build/rules/，脚本/安装包放置；Android adb push → filesDir/rules）；无规则目录时启动显式 WARN+空载运行（fail-open），不再静默内嵌。引用点：cmd/dragnetvpn/main.go、internal/wincore/core.go（两处） |
+| M4 | R2 验证样本集 + dragnetctl -verify | ⬜ | 外部可见样本断言文件（域名+期望动作+备注），规则加载/订阅更新后回读断言 must-block/must-allow，失败 exit 1（借鉴 android-ad-cleaner chan-off 结尾复查纪律）；-subscribe 周期刷新后自动跑，GUI 后续接 |
+| M4 | R3 订阅 last-known-good 回滚 | ⬜ | 订阅替换前保留上一版副本；启动加载失败回退上一版而非仅种子（R1 落地后种子回退改为外部文件回退）。借鉴其"版本不匹配→安全模式"降级思想 |
+| M4 | R4 防误杀保护清单（protected-allow） | ⬜ | 外部可见保护文件（@@…$important，加载顺序保证优先于订阅 block 且订阅无法覆盖），收录支付/银行/天气预警/OTA/快递等基础服务域。借鉴其 NEVER 禁改名单 + protected_channel 设计 |
+| M4 | R5 厂商广告/遥测域名规则资产 | ⬜ | 从 android-ad-cleaner 的 AD_PKGS/QUICKAPP/MSA 包名单（com.opos.ads、com.heytap.pictorial、com.miui.systemAdSolution、快应用引擎等）反查厂商广告 SDK 网络端点，逐域人工核对后生成可见规则文件+生成脚本；宁可漏封不误封。把它的"挂起包"能力延伸为罗网的"域名拦截" |
+| M4 | R6 AGENTS.md 运维硬规范 | ⬜ | 给 AI 智能体/测试机的硬规则条款（接管网络先征得同意、每条命令带序列号、改动前备份、验证后回写）+ "验证样本跑通才算完成"验收口径。借鉴其 AGENTS.md 写法 |
 
 demo 范围（开发机已全部交付）：D-1~D-4 + P0-W + P0-A（壳工程与 APK 构建）+ M1 代码侧；测试机接手做全部运行验证（P0-W 清单见上，P0-A 清单见 android/README.md）。
+
+### 追加计划 M4（2026-10-27，基于 android-ad-cleaner 调研吸收）
+
+调研对象：rddmwmddr/android-ad-cleaner（~1.8k 星，MIT；本地克隆 `C:\Data\research\android-ad-cleaner`，不入库）。定性：与本项目**不同层**——它是"UI 自动化+adb 拨开关"（设置层：机型脚本拨系统开关、通知渠道精细关闭、pm suspend 广告 SDK 包），罗网是网络层拦截（DNS/SNI）。互补而非竞品，吸收其工程纪律与数据资产，不做功能复制。逐项依据：
+
+- **R1（合规整改，最高优先）**：用户要求"规则配置可见、不内嵌代码"。2026-10-27 检查结论：订阅目录/白名单 zzz-user-allow.txt/订阅落盘/Android filesDir/rules 全部合规；唯一违规是 internal/blocklist/starter.txt 经 go:embed 编入三个产物（cmd/dragnetvpn/main.go、internal/wincore/core.go ×2），缺规则目录时静默回退种子。整改后种子=随分发包的普通规则文件；无规则目录时显式 WARN+空载运行（fail-open，与 Holder.Match 未加载时放行语义一致）。测试夹具（semantic.go 的 example.com、rulebench 内置查询域名）属测试数据，豁免。
+- **R5（数据资产转化）**：其 AD_PKGS/QUICKAPP/MSA 处置名单是社区实测沉淀的厂商广告生态清单；反查这些 SDK 的网络端点整理成罗网本地规则资产（可见文件+生成脚本），把"挂起包"延伸为"域名拦截"，两条路线覆盖面互补。
+- **R2（验证纪律）**：借鉴其 chan-off 结尾复查 + verify（"仍开着: N 个"→exit 1，失败不假报成功）。
+- **R3（降级策略）**：借鉴其机型脚本版本不匹配→安全模式（宁少勿错）；现状 M3 已有原子替换+失败回退种子，补上一版回退。
+- **R4（保护清单）**：借鉴其 NEVER 禁改名单 + protected_channel（找机位通知保护）——把"宁可漏封不误封"从代码原则固化为用户可见文件。
+- **R6（协作规范）**：借鉴其 AGENTS.md 硬规则条款式写法（写给 AI 智能体的操作红线）。
+
+优先级：R1 > R2 ≈ R5 > R3 > R4 > R6。M4 不阻塞 M3 GUI 编码（R1 须在 GUI 打包前完成）。
 
 ### P0-W 移交测试清单（测试机执行，需管理员）
 
@@ -117,6 +137,7 @@ go build -tags with_gvisor -o build/dragnet-tun.exe ./cmd/dragnet-tun
 
 ## 更新日志
 
+- 2026-10-27（四，开发机）：调研 android-ad-cleaner（UI 自动化+adb 拨开关去广告，~1.8k 星）：原理=机型脚本读屏拨开关+通知渠道精细关闭+pm suspend 广告 SDK（小米 MSA 另加系统级禁联网）。据此**追加 M4 六项**：种子规则出二进制（R1 合规整改）/验证样本集+`-verify`（R2）/last-known-good 回滚（R3）/防误杀保护清单（R4）/厂商广告域名规则资产（R5）/AGENTS.md 硬规范（R6）。**规则可见性检查结论：订阅/白名单/落盘/Android 端全部外部可见合规；唯一违规 internal/blocklist/starter.txt go:embed 内嵌（dragnet-tun/wincore/dragnetvpn 三处），整改归 M4-R1**。调研文档 docs/research/05（源机器，不入库）
 - 2026-10-27（三，开发机）：M3 控制面落地：internal/ipc 命名管道控制通道（DACL SDDL 限定 SYSTEM/Admins/当前用户、GetNamedPipeClientProcessId 对端校验只放行罗网组件、v1 版本化 JSON 协议、4KB 行长上限防注入）；tunstack 三处阻断路径加 OnBlocked 回调，dragnet-tun 落 256 条环形缓冲供回溯；白名单实现为规则目录内 zzz-user-allow.txt（@@||domain^$important），IPC allow/deny 后即时热切换；dragnetctl 新增 `-pipe` 客户端子命令。**命名管道往返在本机无特权单测通过**（status/blocks/allow/allowlist 全链路 + 协议防护 4 例）。注意：本轮发现 WindowsApps python stub 导致 heredoc 编辑静默失效的踩坑，全部改动已用工具重做并逐项 grep 验证。
 - 2026-10-27（二，开发机）：M3 订阅条件更新落地：internal/subscribe（ETag/Last-Modified 条件请求、32MB/10 行校验上限、>50% 收缩告警、同目录临时文件原子改名、meta sidecar 记录 ETag/行数、热切换回调）；dragnetctl 新增 `-update` 一次性更新；dragnet-tun 新增 `-subscribe <cfg.json>` 后台周期刷新（订阅 HTTP 出站绑定物理网卡防绕行）。单测 4 个全过（本地 httptest 验证条件闭环），实网冒烟 1/3 更新成功（余两个为环境网络因素）。Go 全量回归 + 自检 13/13。
 - 2026-10-27（开发机）：①round5 疑点转根因修复：新增 internal/windns（GetAdaptersAddresses 快照 + iphlpapi.SetInterfaceDnsSettings，只动 NameServer 不碰搜索域），dragnet-tun 启动时把所有带 DNS 的物理适配器指向 TUN 内置 DNS（v6 同时清空防旁路），退出还原 + 二次 flushdns；`-no-dns-takeover` 诊断开关。②M2 代码侧：dragnetvpn 新增 nativeLoadRules（filesDir/rules 外部订阅，失败回退种子）与 nativeStats（运行统计 JSON）导出（8 符号 llvm-nm 核对）；壳工程前台服务通知保活、UI 统计按钮；android/README 验证清单更新至 5 步。APK 重新构建实测通过（22.4MB）。Go 全量回归 + 自检 13/13。
