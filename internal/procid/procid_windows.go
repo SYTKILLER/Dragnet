@@ -110,6 +110,24 @@ func processName(pid uint32) string {
 	return filepath.Base(windows.UTF16ToString(buf[:size]))
 }
 
+// ImagePath 返回 PID 的完整进程映像路径（IPC 对端进程校验用）；失败返回空串。
+func ImagePath(pid uint32) string {
+	if pid == 0 {
+		return ""
+	}
+	h, err := windows.OpenProcess(processQueryLimit, false, pid)
+	if err != nil {
+		return ""
+	}
+	defer windows.CloseHandle(h)
+	buf := make([]uint16, syscall.MAX_PATH+1)
+	size := uint32(len(buf))
+	if err := windows.QueryFullProcessImageName(h, 0, &buf[0], &size); err != nil {
+		return ""
+	}
+	return windows.UTF16ToString(buf[:size])
+}
+
 // findOwner 遍历扩展连接表，匹配本地端点返回 PID。
 func findOwner(tcp bool, local netip.AddrPort) (uint32, bool) {
 	rowSize := tcpRowSize

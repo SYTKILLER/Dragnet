@@ -28,6 +28,7 @@ func main() {
 	selftest := flag.Bool("selftest", false, "运行内置语义契约自检（不加载订阅）")
 	subConfig := flag.String("subscribe-config", "build/subscribe.json", "订阅配置（缺文件用内置三源）")
 	update := flag.Bool("update", false, "一次性更新订阅到 -lists 目录后退出")
+	pipeMode := flag.String("pipe", "", "控制运行中的服务: status|blocks|allow|deny|allowlist")
 	flag.Parse()
 
 	if *selftest {
@@ -36,6 +37,10 @@ func main() {
 
 	if *update {
 		os.Exit(updateRules(*listsDir, *subConfig))
+	}
+
+	if *pipeMode != "" {
+		os.Exit(pipeMain(append([]string{*pipeMode}, flag.Args()...)))
 	}
 
 	srcs, err := rules.SourcesFromDir(*listsDir)
