@@ -24,7 +24,7 @@
 
 ## 当前状态（更新于 2026-10-27，开发机）
 
-- 阶段：**用户确认本机无法负担 Windows VM**。开发机据此把 round5 疑点转为代码级根因修复（DNS 接管，见 P0-W 行）并完成 M2 代码侧。剩余验证需求收敛为：①模拟器可做的（M2 清单）→ 测试机 AVD 复测；②必须 Windows 网络隔离环境的（P0-W 终验+CLI 长稳）→ 等测试机授权窗口或具备 VM 条件的设备；不阻塞后续编码（M3 订阅+GUI）。
+- 阶段：**M3 订阅条件更新代码侧完成（开发机实网冒烟通过）；M2/M3 待测试机在虚拟设备复核。剩余验证需求：①模拟器可做（M2 清单+订阅热切换）→ 测试机 AVD；②Windows 网络隔离环境（P0-W 终验+CLI 长稳+DNS 接管复测）→ 测试机授权窗口或 VM。不阻塞 M3 GUI（服务化+IPC）编码**
 - 决策状态：技术选型已批准（见下方基线摘要），无未决阻塞项；威胁模型开放问题见 docs/tech/04 §4（round4 实测确认 DoT:853 同样可旁路 DNS 级拦截，与开放问题 1 的 DoH 同类；DNS 接管落地后旁路面收窄为加密 DNS）
 - ⚠️→🔧 round5 疑点处置（2026-10-27）：多 DNS 竞速假说不再依赖 VM 取证先行——已按标准做法实现 DNS 接管（物理适配器 DNS → TUN DNS，快照/还原齐全），从根上消除明文 53 旁路；若复测仍有异常再回到取证路径
 
@@ -55,6 +55,8 @@
 | M0 | M0-3 Verdict 契约 + 一致性测试集 | 🔧 测试集扩充完成 | `go test ./...` 语义契约 13/13（测试机复核通过）；夹具可复用于换引擎验收；定稿待真实订阅逐类核对 |
 | M1 | Windows CLI MVP（docs/tech/03 §8） | ✅ 内核长稳通过（模拟器）/ Windows CLI 本体待 VM | dragnet-tun 六要素宿主机实测全通（DNS 劫持/真实IP映射/SNI 嗅探/urlfilter/REJECT/命中日志含 process=）。**泄漏修复长稳已在 AVD 模拟器实证（共享同一 tunstack+gVisor 内核）**：15min 持续 UDP/TCP/DNS 负载下 Native Heap 持平、TOTAL PSS 收敛稳态、停负载后 socket fd=12/线程=29（会话确实释放，非泄漏）、零 panic、功能不退化。证据见"M1 长稳验证记录"。Windows CLI 本体 30min 浸泡待授权窗口 |
 | M2 | Android 核心薄切片（docs/tech/03 §8） | 🔧 代码侧就绪 | 在 P0-A 最小链路之上：外部订阅接入（filesDir/rules → nativeLoadRules，失败回退种子）、前台服务通知保活、运行统计导出（nativeStats JSON + UI 展示）；`bash scripts/build-android.sh && cd android && gradle assembleDebug` 实测通过；验证清单 android/README.md 第 5 步；模拟器/真机→测试机 |
+| M3 | 订阅条件更新（docs/tech/03 §8） | 🔧 代码侧就绪 | internal/subscribe：ETag/If-Modified-Since 条件请求、体积/行数校验（T4.3 防炸弹）、>50% 收缩告警（T4.1）、同目录临时文件+原子改名落盘、meta sidecar、热切换回调；dragnetctl `-update` 一次性更新；dragnet-tun `-subscribe <cfg.json>` 后台周期刷新（出站绑定物理网卡）。单测 4 个（httptest 条件闭环/校验拒绝/原子替换/缺省回退）+ 实网冒烟（AWAvenue 200+ETag 落盘 976 行成功；anti-AD 限速/hagezi 本机 IPv6 不通属环境因素） |
+| M3 | Windows GUI（服务化+IPC+白名单+回溯 UI） | ⬜ | 订阅管理器已就绪为服务侧组件；GUI 主体待排期 |
 
 demo 范围（开发机已全部交付）：D-1~D-4 + P0-W + P0-A（壳工程与 APK 构建）+ M1 代码侧；测试机接手做全部运行验证（P0-W 清单见上，P0-A 清单见 android/README.md）。
 
@@ -114,6 +116,7 @@ go build -tags with_gvisor -o build/dragnet-tun.exe ./cmd/dragnet-tun
 
 ## 更新日志
 
+- 2026-10-27（二，开发机）：M3 订阅条件更新落地：internal/subscribe（ETag/Last-Modified 条件请求、32MB/10 行校验上限、>50% 收缩告警、同目录临时文件原子改名、meta sidecar 记录 ETag/行数、热切换回调）；dragnetctl 新增 `-update` 一次性更新；dragnet-tun 新增 `-subscribe <cfg.json>` 后台周期刷新（订阅 HTTP 出站绑定物理网卡防绕行）。单测 4 个全过（本地 httptest 验证条件闭环），实网冒烟 1/3 更新成功（余两个为环境网络因素）。Go 全量回归 + 自检 13/13。
 - 2026-10-27（开发机）：①round5 疑点转根因修复：新增 internal/windns（GetAdaptersAddresses 快照 + iphlpapi.SetInterfaceDnsSettings，只动 NameServer 不碰搜索域），dragnet-tun 启动时把所有带 DNS 的物理适配器指向 TUN 内置 DNS（v6 同时清空防旁路），退出还原 + 二次 flushdns；`-no-dns-takeover` 诊断开关。②M2 代码侧：dragnetvpn 新增 nativeLoadRules（filesDir/rules 外部订阅，失败回退种子）与 nativeStats（运行统计 JSON）导出（8 符号 llvm-nm 核对）；壳工程前台服务通知保活、UI 统计按钮；android/README 验证清单更新至 5 步。APK 重新构建实测通过（22.4MB）。Go 全量回归 + 自检 13/13。
 
 - 2026-10-25（测试机，第四次回写）：**M1 长稳在 AVD 模拟器验证通过**（虚拟设备，零接触宿主机网络）。因 cmd/dragnetvpn 与 Windows dragnet-tun 共用同一 gVisor 栈+internal/tunstack，长稳可等效验证共享内核：VPN 上线后 15min 持续打流（nc -u ~10 UDP 会话/秒复现泄漏路径 + TCP + DNS），Native Heap 持平、TOTAL PSS 收敛稳态（~558MB）、**停负载后 socket fd=12/线程=29/fd 总=128（会话确实释放，铁证泄漏修复生效）**、15min 零 panic、功能不退化、nativeStopVpn=0。对比修复前 Windows round1 线性涨 3.4GB 不收敛。至此 P0-A（4/4）+ M1 内核长稳 全部在虚拟设备通过；剩 Windows 专属项（P0-W 第3项 NXDOMAIN 终验+多DNS取证+Windows CLI 本体长稳）待 Windows VM（QEMU 10.1 已装，本机无 ISO，需 ~6GB 官方 ISO 下载，待用户确认是否进行）。模拟器用完即 `adb emu kill` 关闭。
