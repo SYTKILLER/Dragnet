@@ -35,6 +35,7 @@ import (
 
 	"github.com/SYTKILLER/Dragnet/internal/blocklist"
 	"github.com/SYTKILLER/Dragnet/internal/engine"
+	"github.com/SYTKILLER/Dragnet/internal/ipc"
 	"github.com/SYTKILLER/Dragnet/internal/ipcache"
 	"github.com/SYTKILLER/Dragnet/internal/procid"
 	"github.com/SYTKILLER/Dragnet/internal/rules"
@@ -54,6 +55,7 @@ func main() {
 	noDNSTakeover := flag.Bool("no-dns-takeover", false, "禁用 DNS 接管（诊断用；毒化应答可旁路）")
 	verbose := flag.Bool("v", false, "打印 sing-tun 内部调试日志")
 	subConfig := flag.String("subscribe", "", "订阅配置 JSON（设置后按周期后台条件更新并热切换；缺省关闭）")
+	noIPC := flag.Bool("no-ipc", false, "禁用本机控制管道（GUI/CLI 控制面）")
 	flag.Parse()
 
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
@@ -74,6 +76,17 @@ func main() {
 	}
 	var holder rules.Holder
 	must(holder.LoadRules(named), "加载规则")
+	reloadAll := func() error {
+		combined := []engine.NamedRules{{Name: blocklist.StarterName, Text: blocklist.Starter()}}
+		if srcs, err := rules.SourcesFromDir(*lists); err == nil {
+			for _, s := range srcs {
+				if b, err := os.ReadFile(s.Path); err == nil {
+					combined = append(combined, engine.NamedRules{Name: s.Name, Text: string(b)})
+				}
+			}
+		}
+		return holder.LoadRules(combined)
+	}
 	st := holder.Current().Stats()
 	log.Printf("规则引擎就绪: 内置种子 %d 条 + %d 个订阅, 共 %d 行, 存储≈%.1fMB",
 		blocklist.Lines(), st.Lists-1, st.RuleLines, float64(st.StorageEstBytes)/1e6)
@@ -96,6 +109,7 @@ func main() {
 	bind := control.BindToInterface(finder, "", bindIndex)
 	log.Printf("出站绑定: %s", describeInterface(bindIndex))
 
+	ring := newBlockRing(256)
 	procs := procid.NewCache()
 	flushDNSCache(la)
 	h := tunstack.New(tunstack.Config{
@@ -109,6 +123,10 @@ func main() {
 				return procs.LookupTCP(source)
 			}
 			return procs.LookupUDP(source)
+		},
+		OnBlocked: func(kind, domain, rule, list, process string, dest netip.AddrPort) {
+			ring.add(ipc.BlockEvent{Time: time.Now(), Kind: kind, Domain: domain,
+				Rule: rule, List: list, Process: process, Dest: dest.String()})
 		},
 		Log: la,
 	})
@@ -174,23 +192,29 @@ func main() {
 		}
 	}()
 
+	// 本机控制管道（M3 控制面：状态/回溯/白名单热切换）。
+	if !*noIPC {
+		ctl := &ctlHandler{start: time.Now(), ring: ring, listsDir: *lists,
+			reload: reloadAll, log: la.Warn}
+		if srv, err := ipc.NewServer(ctl, false); err == nil {
+			go func() {
+				if err := srv.Serve(); err != nil {
+					la.Error("IPC 服务退出: ", err)
+				}
+			}()
+			log.Printf("控制管道就绪: %s（白名单变更即热切换）", ipc.PipeName)
+		} else {
+			la.Warn("IPC 服务初始化失败: ", err)
+		}
+	}
+
 	// 后台订阅刷新（M3 条件更新）：出站 HTTP 也绑定物理网卡，避免经 TUN 绕一圈。
 	if *subConfig != "" {
 		cfg, err := subscribe.LoadConfig(*subConfig)
 		if err != nil {
 			la.Warn("订阅配置无效，后台刷新停用: ", err)
 		} else {
-			mgr := subscribe.NewManager(*lists, cfg, func() error {
-				named := []engine.NamedRules{{Name: blocklist.StarterName, Text: blocklist.Starter()}}
-				if srcs, err := rules.SourcesFromDir(*lists); err == nil {
-					for _, s := range srcs {
-						if b, err := os.ReadFile(s.Path); err == nil {
-							named = append(named, engine.NamedRules{Name: s.Name, Text: string(b)})
-						}
-					}
-				}
-				return holder.LoadRules(named)
-			}, la)
+			mgr := subscribe.NewManager(*lists, cfg, reloadAll, la)
 			mgr.SetClient(&http.Client{
 				Timeout:   60 * time.Second,
 				Transport: &http.Transport{Proxy: http.ProxyFromEnvironment, DialContext: (&net.Dialer{Timeout: 30 * time.Second, Control: bind}).DialContext},

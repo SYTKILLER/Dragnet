@@ -56,7 +56,8 @@
 | M1 | Windows CLI MVP（docs/tech/03 §8） | ✅ 内核长稳通过（模拟器）/ Windows CLI 本体待 VM | dragnet-tun 六要素宿主机实测全通（DNS 劫持/真实IP映射/SNI 嗅探/urlfilter/REJECT/命中日志含 process=）。**泄漏修复长稳已在 AVD 模拟器实证（共享同一 tunstack+gVisor 内核）**：15min 持续 UDP/TCP/DNS 负载下 Native Heap 持平、TOTAL PSS 收敛稳态、停负载后 socket fd=12/线程=29（会话确实释放，非泄漏）、零 panic、功能不退化。证据见"M1 长稳验证记录"。Windows CLI 本体 30min 浸泡待授权窗口 |
 | M2 | Android 核心薄切片（docs/tech/03 §8） | 🔧 代码侧就绪 | 在 P0-A 最小链路之上：外部订阅接入（filesDir/rules → nativeLoadRules，失败回退种子）、前台服务通知保活、运行统计导出（nativeStats JSON + UI 展示）；`bash scripts/build-android.sh && cd android && gradle assembleDebug` 实测通过；验证清单 android/README.md 第 5 步；模拟器/真机→测试机 |
 | M3 | 订阅条件更新（docs/tech/03 §8） | 🔧 代码侧就绪 | internal/subscribe：ETag/If-Modified-Since 条件请求、体积/行数校验（T4.3 防炸弹）、>50% 收缩告警（T4.1）、同目录临时文件+原子改名落盘、meta sidecar、热切换回调；dragnetctl `-update` 一次性更新；dragnet-tun `-subscribe <cfg.json>` 后台周期刷新（出站绑定物理网卡）。单测 4 个（httptest 条件闭环/校验拒绝/原子替换/缺省回退）+ 实网冒烟（AWAvenue 200+ETag 落盘 976 行成功；anti-AD 限速/hagezi 本机 IPv6 不通属环境因素） |
-| M3 | Windows GUI（服务化+IPC+白名单+回溯 UI） | ⬜ | 订阅管理器已就绪为服务侧组件；GUI 主体待排期 |
+| M3 | 控制面：本机 IPC + 白名单 + 回溯 | 🔧 代码侧就绪 | internal/ipc 命名管道（DACL=SYSTEM+Admins+当前用户、对端进程校验只放行罗网组件、v1 版本化 JSON 协议、4KB 行长上限）；tunstack 三处阻断路径加 OnBlocked→256 条环形缓冲；白名单 zzz-user-allow.txt（@@…$important）随目录加载、IPC 变更即热切换；dragnet-tun 默认开（-no-ipc 可关）；dragnetctl `-pipe status\|blocks\|allow\|deny\|allowlist`。**管道往返本机无特权单测实测通过**（功能 4 例+协议防护 4 例）；提权端到端（服务+真客户端）→ 测试机 |
+| M3 | Windows GUI（Flutter 壳 + 服务化+回滚+UWP 豁免） | ⬜ | 控制面/订阅面已就绪为组件；dragnetd 服务化与 GUI 主体待排期 |
 
 demo 范围（开发机已全部交付）：D-1~D-4 + P0-W + P0-A（壳工程与 APK 构建）+ M1 代码侧；测试机接手做全部运行验证（P0-W 清单见上，P0-A 清单见 android/README.md）。
 
@@ -116,6 +117,7 @@ go build -tags with_gvisor -o build/dragnet-tun.exe ./cmd/dragnet-tun
 
 ## 更新日志
 
+- 2026-10-27（三，开发机）：M3 控制面落地：internal/ipc 命名管道控制通道（DACL SDDL 限定 SYSTEM/Admins/当前用户、GetNamedPipeClientProcessId 对端校验只放行罗网组件、v1 版本化 JSON 协议、4KB 行长上限防注入）；tunstack 三处阻断路径加 OnBlocked 回调，dragnet-tun 落 256 条环形缓冲供回溯；白名单实现为规则目录内 zzz-user-allow.txt（@@||domain^$important），IPC allow/deny 后即时热切换；dragnetctl 新增 `-pipe` 客户端子命令。**命名管道往返在本机无特权单测通过**（status/blocks/allow/allowlist 全链路 + 协议防护 4 例）。注意：本轮发现 WindowsApps python stub 导致 heredoc 编辑静默失效的踩坑，全部改动已用工具重做并逐项 grep 验证。
 - 2026-10-27（二，开发机）：M3 订阅条件更新落地：internal/subscribe（ETag/Last-Modified 条件请求、32MB/10 行校验上限、>50% 收缩告警、同目录临时文件原子改名、meta sidecar 记录 ETag/行数、热切换回调）；dragnetctl 新增 `-update` 一次性更新；dragnet-tun 新增 `-subscribe <cfg.json>` 后台周期刷新（订阅 HTTP 出站绑定物理网卡防绕行）。单测 4 个全过（本地 httptest 验证条件闭环），实网冒烟 1/3 更新成功（余两个为环境网络因素）。Go 全量回归 + 自检 13/13。
 - 2026-10-27（开发机）：①round5 疑点转根因修复：新增 internal/windns（GetAdaptersAddresses 快照 + iphlpapi.SetInterfaceDnsSettings，只动 NameServer 不碰搜索域），dragnet-tun 启动时把所有带 DNS 的物理适配器指向 TUN 内置 DNS（v6 同时清空防旁路），退出还原 + 二次 flushdns；`-no-dns-takeover` 诊断开关。②M2 代码侧：dragnetvpn 新增 nativeLoadRules（filesDir/rules 外部订阅，失败回退种子）与 nativeStats（运行统计 JSON）导出（8 符号 llvm-nm 核对）；壳工程前台服务通知保活、UI 统计按钮；android/README 验证清单更新至 5 步。APK 重新构建实测通过（22.4MB）。Go 全量回归 + 自检 13/13。
 

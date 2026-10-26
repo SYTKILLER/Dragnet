@@ -52,6 +52,9 @@ type Config struct {
 	Bind control.Func
 	// ProcessLookup 进程识别注入，可为 nil。
 	ProcessLookup func(network uint8, source netip.AddrPort) string
+	// OnBlocked 在每次阻断时回调（回溯 UI/IPC 数据源）；必须快速返回，
+	// 绝不阻塞转发路径。
+	OnBlocked func(kind, domain, rule, list, process string, dest netip.AddrPort)
 	// Log 使用 sing logger 接口（与 sing-tun 同一适配器复用）。
 	Log Logger
 }
@@ -170,6 +173,9 @@ func (h *Handler) handleDNS(payload []byte, source, destination M.Socksaddr, wri
 	h.cfg.Log.Debug("DNS 判定 qname=", qname, " action=", res.Action, " list=", res.List, " dst=", destination)
 	if res.Action == verdict.ActionBlock {
 		h.stats.dnsBlocked.Add(1)
+		if h.cfg.OnBlocked != nil {
+			h.cfg.OnBlocked("dns", qname, res.RuleText, res.List, "", destination.AddrPort())
+		}
 		h.cfg.Log.Info("阻断 DNS ", qname, " ", ruleInfo(res))
 		resp := dnsmessage.Message{
 			ID:                 query.ID,
@@ -282,6 +288,9 @@ func (h *Handler) NewConnectionEx(ctx context.Context, conn net.Conn, source, de
 	res := h.match(domain, destination.AddrPort(), proc)
 	if res.Action == verdict.ActionBlock {
 		h.stats.tcpBlocked.Add(1)
+		if h.cfg.OnBlocked != nil {
+			h.cfg.OnBlocked("tcp", domain, res.RuleText, res.List, proc, destination.AddrPort())
+		}
 		h.cfg.Log.Info("阻断 TCP ", source, " -> ", destination,
 			" domain=", orNone(domain), " process=", orNone(proc), " ", ruleInfo(res))
 		return
@@ -324,6 +333,9 @@ func (h *Handler) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, 
 	res := h.match(h.cfg.Cache.Domain(destination.AddrPort().Addr(), time.Now()), destination.AddrPort(), proc)
 	if res.Action == verdict.ActionBlock {
 		h.stats.udpBlocked.Add(1)
+		if h.cfg.OnBlocked != nil {
+			h.cfg.OnBlocked("udp", "", res.RuleText, res.List, proc, destination.AddrPort())
+		}
 		h.cfg.Log.Info("阻断 UDP ", source, " -> ", destination, " ", ruleInfo(res))
 		return
 	}
