@@ -28,3 +28,13 @@ fetch "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/mult
 
 echo "---- 完成 ----"
 wc -c build/rules/*.txt
+
+# ---- M4-R1: 种子/保护清单/验证样本随订阅目录分发（不覆盖已有文件）----
+if [ -d rules ]; then
+    for f in rules/*.txt rules/*.list; do
+        [ -e "$f" ] || continue
+        base=$(basename "$f")
+        [ -e "build/rules/$base" ] || cp "$f" "build/rules/$base"
+    done
+    echo "---- 种子与保护清单已就位（rules/ → build/rules/，不覆盖已有）----"
+fi

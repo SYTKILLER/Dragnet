@@ -73,7 +73,6 @@ import (
 
 	tun "github.com/sagernet/sing-tun"
 
-	"github.com/SYTKILLER/Dragnet/internal/blocklist"
 	"github.com/SYTKILLER/Dragnet/internal/engine"
 	"github.com/SYTKILLER/Dragnet/internal/ipcache"
 	"github.com/SYTKILLER/Dragnet/internal/rules"
@@ -240,18 +239,16 @@ func startVPN(fd int, dnsUp string, mtu int) int {
 		mtu = 1500
 	}
 
-	// 规则：外部加载优先，否则内置种子。
+	// 规则：仅来自外部加载（nativeLoadRules，M4-R1 规则可见性合规——
+	// 无任何内嵌种子）。未加载时空载运行（fail-open），显式告警。
+	alog := &androidLogger{}
 	holderMu.Lock()
 	if holder.Current() == nil {
-		if err := holder.LoadRules([]engine.NamedRules{{Name: blocklist.StarterName, Text: blocklist.Starter()}}); err != nil {
-			holderMu.Unlock()
-			return -13
-		}
+		alog.Warn("无外部规则（filesDir/rules 为空）——空载运行：无任何规则生效（fail-open）")
 	}
 	holderLocal := &holder
 	holderMu.Unlock()
 
-	alog := &androidLogger{}
 	h := tunstack.New(tunstack.Config{
 		Holder:     holderLocal,
 		Cache:      ipcache.New(ipcache.DefaultCapacity, ipcache.DefaultTTL),

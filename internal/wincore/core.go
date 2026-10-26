@@ -9,14 +9,15 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"strings"
 	"os"
+	"path/filepath"
 	"time"
 
 	tun "github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common/control"
 	"golang.org/x/sys/windows"
 
-	"github.com/SYTKILLER/Dragnet/internal/blocklist"
 	"github.com/SYTKILLER/Dragnet/internal/engine"
 	"github.com/SYTKILLER/Dragnet/internal/ipc"
 	"github.com/SYTKILLER/Dragnet/internal/ipcache"
@@ -24,6 +25,7 @@ import (
 	"github.com/SYTKILLER/Dragnet/internal/rules"
 	"github.com/SYTKILLER/Dragnet/internal/subscribe"
 	"github.com/SYTKILLER/Dragnet/internal/tunstack"
+	"github.com/SYTKILLER/Dragnet/internal/verify"
 	"github.com/SYTKILLER/Dragnet/internal/windns"
 )
 
@@ -47,37 +49,73 @@ type CoreOptions struct {
 
 // Run 装配并运行内核直到 ctx 取消；返回前的清理保证系统状态还原。
 func Run(ctx context.Context, opts CoreOptions, la *LogAdapter) error {
-	// 规则：内置种子（开箱即用）+ 可选外部订阅目录（缺目录仅告警不失败）。
-	named := []engine.NamedRules{{Name: blocklist.StarterName, Text: blocklist.Starter()}}
-	if srcs, err := rules.SourcesFromDir(opts.Lists); err == nil {
-		for _, s := range srcs {
-			if b, err := os.ReadFile(s.Path); err == nil {
-				named = append(named, engine.NamedRules{Name: s.Name, Text: string(b)})
-			} else {
-				la.Warn("跳过规则文件 ", s.Path, ": ", err)
-			}
-		}
-	} else {
-		la.Warn("外部订阅目录不可用（", err, "），仅使用内置种子规则")
-	}
+	// 规则目录是唯一规则来源（M4-R1 规则可见性合规：种子/订阅/白名单均为
+	// 外部可见文件，无任何内嵌规则）。目录缺失或为空时空载运行（fail-open：
+	// Holder 无引擎时 Match 恒 NoMatch 放行），显式 WARN 不静默。
+	// 加载链（M4-R2/R3）：构建 → 样本断言 → 原子切换；失败回滚 last-known-good；
+	// 成功后快照 LKG 供下次回滚。
 	var holder rules.Holder
-	if err := holder.LoadRules(named); err != nil {
-		return fmt.Errorf("加载规则: %w", err)
+	loadDir := func(dir string) ([]engine.NamedRules, error) {
+		srcs, err := rules.SourcesFromDir(dir)
+		if err != nil {
+			return nil, err
+		}
+		named := make([]engine.NamedRules, 0, len(srcs))
+		for _, s := range srcs {
+			b, err := os.ReadFile(s.Path)
+			if err != nil {
+				la.Warn("跳过规则文件 ", s.Path, ": ", err)
+				continue
+			}
+			named = append(named, engine.NamedRules{Name: s.Name, Text: string(b)})
+		}
+		return named, nil
 	}
-	reloadAll := func() error {
-		combined := []engine.NamedRules{{Name: blocklist.StarterName, Text: blocklist.Starter()}}
-		if srcs, err := rules.SourcesFromDir(opts.Lists); err == nil {
-			for _, s := range srcs {
-				if b, err := os.ReadFile(s.Path); err == nil {
-					combined = append(combined, engine.NamedRules{Name: s.Name, Text: string(b)})
+	samplesPath := filepath.Join(opts.Lists, "verify-samples.list")
+	lkgDir := filepath.Join(opts.Lists, ".lkg")
+	applyRules := func() error {
+		named, err := loadDir(opts.Lists)
+		if err != nil {
+			return err
+		}
+		var vfy func(engine.Matcher) error
+		if samples, serr := verify.LoadSamples(samplesPath); serr == nil {
+			vfy = func(m engine.Matcher) error {
+				if fails := verify.Check(m, samples); len(fails) > 0 {
+					return fmt.Errorf("验证样本 %d/%d 不过，例如 %s (期望 %s 得到 %s)",
+						len(fails), len(samples), fails[0].Sample.Domain,
+						fails[0].Sample.Want, fails[0].Got)
 				}
+				return nil
 			}
 		}
-		return holder.LoadRules(combined)
+		if err := holder.LoadVerified(named, vfy); err != nil {
+			// M4-R3：样本不过/构建失败 → 回退 last-known-good。
+			la.Warn("规则加载未通过（", err, "），尝试 last-known-good 回滚")
+			lkgNamed, lerr := loadDir(lkgDir)
+			if lerr != nil || len(lkgNamed) == 0 {
+				return fmt.Errorf("LKG 回滚不可用: %w", err)
+			}
+			if lerr := holder.LoadRules(lkgNamed); lerr != nil {
+				return fmt.Errorf("LKG 回滚失败: %w（沿用旧引擎）", lerr)
+			}
+			la.Warn("已回滚到 last-known-good 规则（降级运行）")
+			return nil
+		}
+		// 成功：快照当前规则为 LKG（.lkg 子目录，SourcesFromDir 不会读子目录）。
+		snapshotLKG(opts.Lists, lkgDir, la)
+		return nil
 	}
-	st := holder.Current().Stats()
-	log.Printf("规则引擎就绪: 内置种子 %d 条 + %d 个订阅, 共 %d 行, 存储≈%.1fMB",
-		blocklist.Lines(), st.Lists-1, st.RuleLines, float64(st.StorageEstBytes)/1e6)
+	var reloadAll = applyRules
+	if err := applyRules(); err != nil {
+		la.Error("规则加载失败且无 LKG 可回滚——空载运行：无任何规则生效（fail-open）: ", err)
+	} else if cur := holder.Current(); cur != nil {
+		st := cur.Stats()
+		log.Printf("规则引擎就绪: %d 个规则文件, 共 %d 行, 存储≈%.1fMB",
+			st.Lists, st.RuleLines, float64(st.StorageEstBytes)/1e6)
+	} else {
+		la.Warn("规则目录为空——空载运行：无任何规则生效（fail-open）")
+	}
 
 	// 网络监视器 + 接口查找器（sing-tun AutoRoute 依赖）。
 	netMon, err := tun.NewNetworkUpdateMonitor(la)
@@ -316,4 +354,32 @@ func describeInterface(index int) string {
 		return fmt.Sprintf("%s (index %d)", nif.Name, index)
 	}
 	return fmt.Sprintf("index %d", index)
+}
+
+// snapshotLKG 把规则目录的全部顶层 .txt 复制到 lkgDir（成功加载后的快照，
+// M4-R3 回滚数据源）。规则目录里放 .lkg 子目录不会参与加载（SourcesFromDir
+// 不递归）。逐文件容错：个别失败只告警。
+func snapshotLKG(listsDir, lkgDir string, la *LogAdapter) {
+	if err := os.MkdirAll(lkgDir, 0o755); err != nil {
+		la.Warn("创建 LKG 目录失败: ", err)
+		return
+	}
+	entries, err := os.ReadDir(listsDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.EqualFold(filepath.Ext(e.Name()), ".txt") {
+			continue
+		}
+		src := filepath.Join(listsDir, e.Name())
+		dst := filepath.Join(lkgDir, e.Name())
+		b, err := os.ReadFile(src)
+		if err != nil {
+			continue
+		}
+		if err := os.WriteFile(dst, b, 0o644); err != nil {
+			la.Warn("LKG 快照 ", e.Name(), " 失败: ", err)
+		}
+	}
 }

@@ -1,0 +1,9 @@
+# 罗网验证样本集（M4-R2）：规则加载与订阅更新后的回归断言。
+# 格式：域名  期望(block|allow|nomatch)  [备注]
+# 口径：与三类主流订阅（anti-AD/AWAvenue/hagezi）+ starter 共同约束下的稳定事实；
+# 新增样本必须是长期稳定域名，宁可少而稳。
+doubleclick.net	block	 广告硬核域（starter+全订阅覆盖）
+googlesyndication.com	block	Google 广告（starter+全订阅覆盖）
+www.google-analytics.com	block	GA 跟踪（anti-AD+hagezi）
+ads.example.com	nomatch	example.com 保留域：仅语义夹具使用，样本集本身不含该规则
+www.baidu.com	nomatch	国内主流站不得误杀（反例哨兵）

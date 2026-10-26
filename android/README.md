@@ -23,10 +23,13 @@ Gradle/AGP 走代理时在命令行追加：
 3. 浏览器访问 `doubleclick.net` 等种子规则域名 → 请求失败（DNS NXDOMAIN）；
    普通网站正常；`logcat` 出现"阻断 DNS ..."。
 4. 点"停止拦截"→ `nativeStopVpn = 0`，网络恢复正常，通知消失。
-5. （M2）外部订阅：`adb push anti-AD.txt /data/local/tmp/ && adb shell run-as
-   com.dragnet.app mkdir -p files/rules && adb shell run-as com.dragnet.app cp
-   /data/local/tmp/anti-AD.txt files/rules/`，重启拦截，logcat 确认
+5. （M2）外部规则（M4-R1 起必须，内核无内嵌种子）：
+   `adb push rules/starter.txt /data/local/tmp/ && adb shell run-as com.dragnet.app
+   mkdir -p files/rules && adb shell run-as com.dragnet.app cp
+   /data/local/tmp/starter.txt files/rules/`，重启拦截，logcat 确认
    `nativeLoadRules = 0`；点"运行统计"按钮可见 JSON 计数。
+   （可选）同样方式 push rules/protected-allow.txt（防误杀保护清单）。
 
-已知限制（PoC 范围）：仅 IPv4；外部订阅为手动 push（订阅下载 M3）；Windows
-侧 DNS 接管修复对应本壳无感（Android 查询天然独占进 TUN）。
+已知限制（PoC 范围）：仅 IPv4；外部规则为手动 push（订阅下载 M3 已在 Windows
+侧实现，Android 侧接入排期中）；未 push 规则时内核空载 fail-open（不拦截，
+logcat 有"WARN 无外部规则"）。

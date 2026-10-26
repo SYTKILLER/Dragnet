@@ -156,8 +156,60 @@ func install(kernelArgs []string) {
 		{Type: mgr.ServiceRestart, Delay: 30 * time.Second}}
 	must(s.SetRecoveryActions(recovery, 24*3600), "配置恢复策略")
 
+	// 种子/保护清单/验证样本随服务分发（M4-R1：规则全部外部可见文件）。
+	copySeedRules(rulesTargetDir(args))
+
 	defer s.Close()
 	fmt.Printf("服务已注册: %s\n  启动: sc start %s\n  参数: %v\n", serviceName, serviceName, args)
+}
+
+// rulesTargetDir 从注册参数里取 -lists 的值（install 已绝对路径化）。
+func rulesTargetDir(args []string) string {
+	for i, a := range args {
+		if a == "-lists" && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return "C:\\ProgramData\\Dragnet\\rules"
+}
+
+// copySeedRules 把可执行文件旁 rules/ 下的 .txt/.list 复制到目标规则目录
+//（不覆盖已有文件——用户订阅与白名单不受影响）。
+func copySeedRules(dstDir string) {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	srcDir := filepath.Join(filepath.Dir(exe), "rules")
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		fmt.Printf("提示: 未找到分发规则目录 %s（服务将以空载 fail-open 启动；请放置 rules/starter.txt）\n", srcDir)
+		return
+	}
+	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		ext := filepath.Ext(e.Name())
+		if ext != ".txt" && ext != ".list" {
+			continue
+		}
+		dst := filepath.Join(dstDir, e.Name())
+		if _, err := os.Stat(dst); err == nil {
+			continue // 不覆盖
+		}
+		b, err := os.ReadFile(filepath.Join(srcDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		if err := os.WriteFile(dst, b, 0o644); err != nil {
+			continue
+		}
+		fmt.Printf("已分发规则文件: %s → %s\n", e.Name(), dstDir)
+	}
 }
 
 func uninstall() {

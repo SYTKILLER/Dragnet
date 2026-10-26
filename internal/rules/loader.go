@@ -67,14 +67,30 @@ func (h *Holder) Load(srcs []Source) error {
 	return h.LoadRules(named)
 }
 
-// LoadRules 从内存规则文本构建新引擎并原子切换（内置种子规则、C ABI 传入等）。
+// LoadRules 从内存规则文本构建新引擎并原子切换（C ABI 传入、目录重载等）。
+// named 为空时清空引擎（回到 fail-open 空载态，M4-R1：无内嵌种子回退）。
 func (h *Holder) LoadRules(named []engine.NamedRules) error {
+	return h.LoadVerified(named, nil)
+}
+
+// LoadVerified 构建引擎 → 可选验证（M4-R2 样本断言）→ 原子切换。
+// 验证失败时旧引擎保持不变、新存储释放，返回错误。
+func (h *Holder) LoadVerified(named []engine.NamedRules, verify func(engine.Matcher) error) error {
 	if len(named) == 0 {
-		return fmt.Errorf("rules: 没有可加载的规则")
+		if old := h.cur.Swap(nil); old != nil {
+			_ = old.Close()
+		}
+		return nil
 	}
 	eng, err := engine.NewURLFilter(named)
 	if err != nil {
 		return err
+	}
+	if verify != nil {
+		if err := verify(eng); err != nil {
+			_ = eng.Close()
+			return err
+		}
 	}
 
 	if old := h.cur.Swap(eng); old != nil {

@@ -28,11 +28,21 @@ func main() {
 	selftest := flag.Bool("selftest", false, "运行内置语义契约自检（不加载订阅）")
 	subConfig := flag.String("subscribe-config", "build/subscribe.json", "订阅配置（缺文件用内置三源）")
 	update := flag.Bool("update", false, "一次性更新订阅到 -lists 目录后退出")
+	verifyMode := flag.Bool("verify", false, "对样本集（-samples）断言规则引擎，失败 exit 1")
+	samples := flag.String("samples", "", "验证样本文件（缺省 <lists>/verify-samples.list）")
 	pipeMode := flag.String("pipe", "", "控制运行中的服务: status|blocks|allow|deny|allowlist")
 	flag.Parse()
 
 	if *selftest {
 		os.Exit(selfTest())
+	}
+
+	if *verifyMode {
+		sp := *samples
+		if sp == "" {
+			sp = defaultSamplesPath(*listsDir)
+		}
+		os.Exit(verifyRules(*listsDir, sp))
 	}
 
 	if *update {
