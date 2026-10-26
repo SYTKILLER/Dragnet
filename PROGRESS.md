@@ -24,8 +24,8 @@
 
 ## 当前状态（更新于 2026-10-27，开发机）
 
-- **追加计划 M4 已立项（2026-10-27，基于 android-ad-cleaner 调研吸收，六项见看板 M4 行）**。规则可见性检查结论：订阅目录/用户白名单/订阅落盘/Android 端规则均为外部可见文件，合规；**唯一违规：internal/blocklist/starter.txt 经 go:embed 内嵌二进制（dragnet-tun/wincore/dragnetvpn 三处引用，缺目录时静默回退种子），整改列为 M4-R1 最高优先**（需在 GUI/安装包成型前完成）。测试夹具（semantic.go、rulebench）属测试数据豁免。调研详情见源机器 docs/research/05（不入库）
-- 阶段：**M3 订阅条件更新代码侧完成（开发机实网冒烟通过）；M2/M3 待测试机在虚拟设备复核。M2/M3 待测试机在虚拟设备复核。剩余验证需求：①模拟器可做（M2 清单+订阅热切换）→ 测试机 AVD；②Windows 网络隔离环境（P0-W 终验+CLI 长稳+DNS 接管复测）→ 测试机授权窗口或 VM。不阻塞 M3 GUI（服务化+IPC）编码**
+- **追加计划 M4 六项：R1/R2/R3/R4/R6 代码侧完成（2026-10-27，R2 验证 5/5 实测、R1 go:embed 归零 grep 验证）；R5 草稿就绪待真机核对（scripts/gen-vendor-rules.sh，8 条候选不进加载路径）**。规则可见性：订阅/种子/白名单/保护清单/验证样本/订阅落盘/Android filesDir 全部外部可见文件，合规
+- 阶段：**开发机编码面收口**：M0-1 定稿、M3（订阅+控制面+服务化 dragnetd）、M4-R1~R4/R6 全部落地，Flutter GUI 主体与 R5 核对是仅剩的编码/验证项。剩余验证需求：①模拟器可做（M2 清单+订阅热切换+R1 后 Android 需 push 种子）→ 测试机 AVD；②Windows 网络隔离环境（P0-W 终验+CLI/dragnetd 长稳+DNS 接管复测+提权 IPC 端到端）→ 测试机授权窗口或 VM
 - 决策状态：技术选型已批准（见下方基线摘要），无未决阻塞项；威胁模型开放问题见 docs/tech/04 §4（round4 实测确认 DoT:853 同样可旁路 DNS 级拦截，与开放问题 1 的 DoH 同类；DNS 接管落地后旁路面收窄为加密 DNS）
 - ⚠️→🔧 round5 疑点处置（2026-10-27）：多 DNS 竞速假说不再依赖 VM 取证先行——已按标准做法实现 DNS 接管（物理适配器 DNS → TUN DNS，快照/还原齐全），从根上消除明文 53 旁路；若复测仍有异常再回到取证路径
 
@@ -63,7 +63,7 @@
 | M4 | R2 验证样本集 + dragnetctl -verify | ✅ 代码侧完成 | rules/verify-samples.list（.list 后缀避免被当规则加载——首版踩坑已修）；internal/verify 加载/断言；`dragnetctl -verify` **本机实测 5/5 通过**，篡改样本反向验证会 FAIL exit 1；wincore 加载链在换引擎前断言（rules.Holder.LoadVerified），不过→走 R3 回滚 |
 | M4 | R3 订阅 last-known-good 回滚 | ✅ 代码侧完成 | 加载链 = 构建→断言→原子切换→成功后快照 `<lists>/.lkg/`；失败自动回退 LKG（降级 WARN 运行）；LKG 不可用→空载 fail-open。订阅刷新（-subscribe）与白名单热切换共用同一链路 |
 | M4 | R4 防误杀保护清单（protected-allow） | ✅ 代码侧完成 | rules/protected-allow.txt（@@…$important：tenpay/alipay/alipaydns/12379/12306/gov.cn，用户可编辑）；随 fetch 脚本与 dragnetd 分发；三类真实订阅无 $important 阻断（rulestats 实证），保护不可被覆盖 |
-| M4 | R5 厂商广告/遥测域名规则资产 | ⬜ 需联网调研 | 从 android-ad-cleaner AD_PKGS/QUICKAPP/MSA 包名单反查 SDK 网络端点；需联网检索+逐域人工核对（宁可漏封不误封），下轮做 |
+| M4 | R5 厂商广告/遥测域名规则资产 | 🔧 草稿就绪待核对 | scripts/gen-vendor-rules.sh：从包名单反查产出 8 条候选（OPPO opos.ads 4 + 小米 MSA/米盟 4，检索 SDK 官方文档与社区 hosts 实践），全部标注"待真机抓包核对"，**不进任何加载路径**；快应用引擎明确不做域名化（与正常分发同域，误杀风险），走包挂起路线。核对动作=测试机真机/厂商 ROM 抓包（授权窗口） |
 | M4 | R6 AGENTS.md 运维硬规范 | ✅ 完成 | 仓库根 AGENTS.md：网络红线（宿主机禁令五项）/操作纪律/验收口径（-verify 跑通才算完成）/规则可见性硬约束四条 |
 
 demo 范围（开发机已全部交付）：D-1~D-4 + P0-W + P0-A（壳工程与 APK 构建）+ M1 代码侧；测试机接手做全部运行验证（P0-W 清单见上，P0-A 清单见 android/README.md）。
