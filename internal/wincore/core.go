@@ -9,9 +9,9 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
-	"strings"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	tun "github.com/sagernet/sing-tun"
@@ -45,10 +45,39 @@ type CoreOptions struct {
 	SubscribeConfig string
 	NoDNSTakeover   bool
 	NoIPC           bool
+	// LogFile 非空时把 std log 输出重定向到该文件（服务模式：SCM 下 stderr
+	// 无处可去）。简单轮转：打开时超过 MaxLogBytes 则改名 .1 后新建。
+	LogFile string
+}
+
+// MaxLogBytes 是服务日志单文件上限（轮转阈值）。
+const MaxLogBytes = 16 << 20
+
+// setupLogFile 重定向 std log 到文件并返回还原函数；失败返回 nil（保持 stderr）。
+func setupLogFile(path string) (restore func(), err error) {
+	if path == "" {
+		return nil, nil
+	}
+	if st, serr := os.Stat(path); serr == nil && st.Size() > MaxLogBytes {
+		_ = os.Rename(path, path+".1") // 简单轮转：只留一代旧日志
+	}
+	f, ferr := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if ferr != nil {
+		return nil, ferr
+	}
+	old := log.Writer()
+	log.SetOutput(f)
+	return func() { log.SetOutput(old); f.Close() }, nil
 }
 
 // Run 装配并运行内核直到 ctx 取消；返回前的清理保证系统状态还原。
 func Run(ctx context.Context, opts CoreOptions, la *LogAdapter) error {
+	if restore, err := setupLogFile(opts.LogFile); err != nil {
+		la.Warn("服务日志文件不可用（", err, "），日志保持 stderr")
+	} else if restore != nil {
+		defer restore()
+		log.Printf("日志输出: %s（超过 %dMB 轮转为 .1）", opts.LogFile, MaxLogBytes>>20)
+	}
 	// 规则目录是唯一规则来源（M4-R1 规则可见性合规：种子/订阅/白名单均为
 	// 外部可见文件，无任何内嵌规则）。目录缺失或为空时空载运行（fail-open：
 	// Holder 无引擎时 Match 恒 NoMatch 放行），显式 WARN 不静默。

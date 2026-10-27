@@ -8,6 +8,7 @@ import (
 	"flag"
 	"net/netip"
 	"os"
+	"path/filepath"
 
 	"github.com/SYTKILLER/Dragnet/internal/wincore"
 )
@@ -24,6 +25,7 @@ func serviceOptions(args []string) (opts wincore.CoreOptions, la *wincore.LogAda
 	subConfig := fs.String("subscribe", "", "订阅配置 JSON")
 	noDNSTakeover := fs.Bool("no-dns-takeover", false, "禁用 DNS 接管")
 	noIPC := fs.Bool("no-ipc", false, "禁用控制管道")
+	logFile := fs.String("logfile", "C:\\ProgramData\\Dragnet\\logs\\dragnetd.log", "服务日志文件（轮转 16MB）")
 	verbose := fs.Bool("v", false, "调试日志")
 	_ = fs.Parse(args) // 参数来自注册表，解析失败不致命：走默认值
 
@@ -35,9 +37,11 @@ func serviceOptions(args []string) (opts wincore.CoreOptions, la *wincore.LogAda
 		DNSTimeout:      *dnsTimeout,
 		SubscribeConfig: *subConfig,
 		NoDNSTakeover:   *noDNSTakeover, NoIPC: *noIPC,
+		LogFile: *logFile,
 	}
 	if _, err := os.Stat(opts.Lists); err != nil {
 		_ = os.MkdirAll(opts.Lists, 0o755)
 	}
+	_ = os.MkdirAll(filepath.Dir(*logFile), 0o755)
 	return opts, la
 }

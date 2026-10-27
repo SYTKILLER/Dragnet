@@ -174,7 +174,7 @@ func rulesTargetDir(args []string) string {
 }
 
 // copySeedRules 把可执行文件旁 rules/ 下的 .txt/.list 复制到目标规则目录
-//（不覆盖已有文件——用户订阅与白名单不受影响）。
+// （不覆盖已有文件——用户订阅与白名单不受影响）。
 func copySeedRules(dstDir string) {
 	exe, err := os.Executable()
 	if err != nil {
