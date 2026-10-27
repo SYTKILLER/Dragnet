@@ -61,6 +61,7 @@ build_one() { # $1=goarch $2=abi目录 $3=target三元组
   ls -la "$OUT/$2/libdragnet.so"
 }
 
-# 模拟器（Pura 90 等）为 x86_64 镜像；真机为 arm64（v8a）。
+# 模拟器（Pura 90 等）为 x86_64 镜像；真机为 arm64（v8a，内核侧无需签名即可产出）。
 build_one amd64 x86_64 x86_64
+build_one arm64 arm64-v8a aarch64
 echo "完成。"
