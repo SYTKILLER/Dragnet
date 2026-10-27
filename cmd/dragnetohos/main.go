@@ -73,7 +73,7 @@ var (
 	runStats *tunstack.Handler
 
 	// protect 回握状态
-	protectTsfn js.TsFunc // 零值表示未注册（protect 直接放行）
+	protectTsfn atomic.Pointer[js.TsFunc] // nil 表示未注册（protect 直接放行；atomic：注册在 JS 线程、消费在内核 goroutine）
 	protectSeq  atomic.Int64
 	protectWait sync.Map // id -> chan struct{}
 )
@@ -91,7 +91,7 @@ func startVpn(env js.Env, this js.Value, args []js.Value) any {
 
 	// 先注册 protect 回调（进入内核 goroutine 前完成，避免竞态）
 	tsfn := env.CreateThreadsafeFunction(args[3], "dragnetProtect")
-	protectTsfn = tsfn
+	protectTsfn.Store(&tsfn)
 
 	promise := env.NewPromise()
 	go func() {
@@ -277,7 +277,7 @@ func stopVPN() (rc int) {
 	err := runStack.Close()
 	_ = runDev.Close()
 	runStack, runDev, runStats = nil, nil, nil
-	protectTsfn = js.TsFunc{}
+	protectTsfn.Store(nil)
 	if err != nil {
 		return -1
 	}
@@ -301,10 +301,10 @@ func protectBind(network, address string, conn syscall.RawConn) error {
 }
 
 // notifyProtect 通知 JS protect(id, fd) 并等待 setProtected(id) 回握。
-// 未注册回调（protectTsfn 零值）时直接放行（壳未接 protect 的降级路径）。
+// 未注册回调（protectTsfn 为 nil）时直接放行（壳未接 protect 的降级路径）。
 func notifyProtect(fd int64) int {
-	tsfn := protectTsfn
-	if tsfn.Value == nil {
+	tsfn := protectTsfn.Load()
+	if tsfn == nil {
 		return 0
 	}
 	id := protectSeq.Add(1)
