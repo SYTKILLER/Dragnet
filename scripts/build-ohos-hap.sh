@@ -17,13 +17,15 @@ TARGET="${2:-127.0.0.1:5555}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PROF="$ROOT/ohos/build-profile.json5"
 
-# 1. 内核 .so
-if [ ! -f "$ROOT/build/ohos/x86_64/libdragnet.so" ]; then
-  echo "错误: 先跑 bash scripts/build-ohos.sh 产出内核" >&2
+# 1. 内核 .so（双 ABI：模拟器 x86_64；真机 arm64-v8a）
+if [ ! -f "$ROOT/build/ohos/x86_64/libdragnet.so" ] || [ ! -f "$ROOT/build/ohos/arm64-v8a/libdragnet.so" ]; then
+  echo "错误: 先跑 bash scripts/build-ohos.sh 产出双 ABI 内核" >&2
   exit 1
 fi
-mkdir -p "$ROOT/ohos/entry/libs/x86_64" "$ROOT/ohos/entry/src/main/resources/rawfile/rules"
+mkdir -p "$ROOT/ohos/entry/libs/x86_64" "$ROOT/ohos/entry/libs/arm64-v8a" \
+         "$ROOT/ohos/entry/src/main/resources/rawfile/rules"
 cp "$ROOT/build/ohos/x86_64/libdragnet.so" "$ROOT/ohos/entry/libs/x86_64/"
+cp "$ROOT/build/ohos/arm64-v8a/libdragnet.so" "$ROOT/ohos/entry/libs/arm64-v8a/"
 
 # 2. 种子规则
 cp "$ROOT/rules/starter.txt" "$ROOT/rules/protected-allow.txt" \
