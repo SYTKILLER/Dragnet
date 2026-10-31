@@ -32,7 +32,7 @@ export default class VpnExtAbility extends VpnExtensionAbility {
 
   // PoC 直启路径：模拟器镜像缺 com.huawei.hmos.vpndialog（首次信任授权对话框
   // 系统应用），startVpnExtensionAbility 的授权流程走不通；调试/验证可经
-  //   hdc shell aa start -a VpnExtAbility -b com.march.cimoc
+  //   hdc shell aa start -a VpnExtAbility -b com.march.dragnet
   // 直启（框架按 ServiceExtension 生命周期派发 onRequest）。setup 幂等。
   onRequest(want: Want, startId: number): void {
     this.setup();

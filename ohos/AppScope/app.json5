@@ -1,6 +1,6 @@
 {
   "app": {
-    "bundleName": "com.march.cimoc",
+    "bundleName": "com.march.dragnet",
     "vendor": "example",
     "versionCode": 1000000,
     "versionName": "1.0.0",

@@ -22,7 +22,7 @@ struct Index {
   @State status: string = '未运行';
   private vpnWant: Want = {
     deviceId: '',
-    bundleName: 'com.march.cimoc',
+    bundleName: 'com.march.dragnet',
     abilityName: 'VpnExtAbility'
   };
 

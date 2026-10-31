@@ -7,7 +7,7 @@
 #   4. devecocli build + hdc install
 # 用法：bash scripts/build-ohos-hap.sh [捐赠工程目录] [hdc目标]
 #   捐赠工程缺省 D:\HarmonyOS_Develop\Cimoc（其 debug profile 设备白名单含本机
-#   模拟器；bundleName 绑定 com.march.cimoc，见 ohos/README.md）
+#   模拟器；bundleName 绑定 com.march.dragnet，见 ohos/README.md）
 # Git Bash 下运行。
 
 set -euo pipefail
@@ -53,7 +53,7 @@ cd "$ROOT/ohos"
 devecocli build
 
 export MSYS_NO_PATHCONV=1
-hdc -t "$TARGET" shell bm uninstall -n com.march.cimoc >/dev/null 2>&1 || true
+hdc -t "$TARGET" shell bm uninstall -n com.march.dragnet >/dev/null 2>&1 || true
 hdc -t "$TARGET" install "entry/build/default/outputs/default/entry-default-signed.hap"
-hdc -t "$TARGET" shell aa start -a EntryAbility -b com.march.cimoc
+hdc -t "$TARGET" shell aa start -a EntryAbility -b com.march.dragnet
 echo "完成。验证步骤见 ohos/README.md。"

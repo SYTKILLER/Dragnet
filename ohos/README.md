@@ -36,8 +36,9 @@ ArkTS 只做四件事——create 拿 tun fd、注册 protect 回调、分发种
    `C:\Program Files\Huawei\DevEco Studio\sdk\default\openharmony\native`。
 3. **签名材料**：本机 DevEco 已有华为账号自动签名产物（`~/.ohos/config`）；
    复用既有工程（如 D:\HarmonyOS_Develop\Cimoc）的 debug 签名块注入
-   build-profile.json5（bundleName 须与 profile 匹配 → 本工程临时用
-   `com.march.cimoc`；正式 bundle 建成后在 DevEco 里自动签名一次替换）。
+   build-profile.json5。bundleName 已定 `com.march.dragnet`（2026-11-01 由
+   临时复用的 com.march.cimoc 更正）；Cimoc 的 debug profile 绑旧包名，
+   需在 AGC/DevEco 为新包名重新自动签名一次。
    签名块含本机加密口令，不入库（仓库内 build-profile.json5 的
    signingConfigs 保持空）。
 
@@ -66,7 +67,7 @@ hdc install entry/build/default/outputs/default/entry-default-signed.hap
    `seed starter.txt -> .../files/rules/starter.txt`。
 2. UI"匹配自检"→ 返回引擎判定（UI 进程实例空载 NOMATCH 属预期，规则在
    VPN 进程加载）。
-3. `hdc shell aa start -a VpnExtAbility -b com.march.cimoc` 直启扩展（模拟器
+3. `hdc shell aa start -a VpnExtAbility -b com.march.dragnet` 直启扩展（模拟器
    绕行路径；真机走 UI 按钮+系统授权对话框）→ hilog：
    `[Dragnet] loadRules(.../files/rules) = 0`（内核 NAPI+引擎+规则全通）
    及 `VpnConnection.create failed: ...`（信任门槛，真机不出现）。
