@@ -1,29 +1,42 @@
-// 匹配自检页：按域名查询当前引擎判定（无网络副作用），渲染判定卡。
+// 匹配自检页（NavDestination + 系统路由表，router_map.json 注册）：
+//   按域名查询当前引擎判定（无网络副作用），渲染判定卡。
+// 规范合规：
+//   - 系统返回键（.title()），禁止自绘返回按钮；
+//   - 内容区不加顶部 padding（原生标题栏下自带偏移，踩坑卡）；
+//   - Search 组件替代 TextInput（原生搜索框，自带清除按钮）；
+//   - 判定图标 SymbolGlyph（禁 emoji）。
 // 数据来自 UI 进程内引擎（RulesPage 进入时已 loadRules filesDir/rules）。
 
-import { router, LengthMetrics } from '@kit.ArkUI';
-import {
-  matchDomain, MatchResult
-} from '../common/DragnetService';
+import { LengthMetrics } from '@kit.ArkUI';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+import { matchDomain, MatchResult } from '../common/DragnetService';
+
+const DOMAIN = 0xD22E0;
 
 interface SampleChip {
   domain: string;
-  expect: string; // 预期提示
+  expect: string;
 }
 
-@Entry
+// 系统路由表入口函数：名字必须与 router_map.json 的 buildFunction 完全一致。
+@Builder
+export function MatchTestPageBuilder() {
+  MatchTestPage()
+}
+
 @Component
 struct MatchTestPage {
   @State inputDomain: string = '';
   @State result: MatchResult | null = null;
   @State emptyNotice: string = '';
+  private pathStack: NavPathStack | null = null;
 
-  private samples: SampleChip[] = [
-    { domain: 'doubleclick.net', expect: '应阻断' },
-    { domain: 'google-analytics.com', expect: '应阻断' },
-    { domain: 'alipay.com', expect: '白名单放行' },
-    { domain: 'baidu.com', expect: '未命中' }
-  ];
+  // onReady 是 NavDestination 标准入页点：取路由栈（本页仅系统返回键即可返回，
+  // 保留栈引用备用，不做自绘返回）。
+  onReady(ctx: NavDestinationContext): void {
+    this.pathStack = ctx.pathStack;
+    hilog.info(DOMAIN, 'Dragnet', '[UI] MatchTest onReady');
+  }
 
   private query(domain: string): void {
     const d = domain.trim();
@@ -35,6 +48,38 @@ struct MatchTestPage {
     }
     this.result = matchDomain(d);
     this.emptyNotice = this.result === null ? '引擎空载：先在规则页加载规则' : '';
+    hilog.info(DOMAIN, 'Dragnet', '[UI] match query %{public}s done', d);
+  }
+
+  private verdictAction(): Resource {
+    // $r 资源名必须字符串字面量（禁插值）——if/else 分支切换（规范）。
+    if (this.result !== null && this.result.action === 'BLOCK') {
+      return $r('sys.symbol.xmark');
+    }
+    if (this.result !== null && this.result.action === 'ALLOW') {
+      return $r('sys.symbol.checkmark_circle_fill');
+    }
+    return $r('sys.symbol.minus');
+  }
+
+  private verdictColor(): ResourceColor {
+    if (this.result !== null && this.result.action === 'BLOCK') {
+      return $r('app.color.danger');
+    }
+    if (this.result !== null && this.result.action === 'ALLOW') {
+      return $r('app.color.safe');
+    }
+    return $r('app.color.text_secondary');
+  }
+
+  private verdictLabel(): string {
+    if (this.result !== null && this.result.action === 'BLOCK') {
+      return '阻断';
+    }
+    if (this.result !== null && this.result.action === 'ALLOW') {
+      return '放行（白名单）';
+    }
+    return '未命中';
   }
 
   @Builder
@@ -49,100 +94,91 @@ struct MatchTestPage {
   }
 
   build() {
-    Column({ space: 14 }) {
-      Row() {
-        Text('←')
-          .fontSize(20)
-          .fontColor($r('app.color.text_primary'))
-          .onClick(() => router.back())
-        Text('匹配自检')
-          .fontSize(20)
-          .fontWeight(FontWeight.Bold)
-          .fontColor($r('app.color.text_primary'))
-          .margin({ left: 10 })
-      }
-      .width('92%')
-      .margin({ top: 16 })
+    NavDestination() {
+      Column({ space: 14 }) {
+        Text('按域名查询当前引擎判定，不产生任何网络请求。')
+          .fontSize(12)
+          .fontColor($r('app.color.text_secondary'))
+          .width('92%')
 
-      Text('按域名查询当前引擎判定，不产生任何网络请求。')
-        .fontSize(12)
-        .fontColor($r('app.color.text_secondary'))
-        .width('92%')
-
-      Row({ space: 8 }) {
-        TextInput({ text: this.inputDomain, placeholder: '输入域名，如 example.com' })
-          .layoutWeight(1)
+        Search({ value: this.inputDomain, placeholder: '输入域名，如 example.com' })
+          .width('92%')
           .height(42)
-          .fontSize(14)
+          .backgroundColor($r('app.color.card_bg'))
           .onChange((value: string) => {
             this.inputDomain = value;
           })
-        Button('查询')
-          .height(42)
-          .fontSize(15)
-          .backgroundColor($r('app.color.primary'))
-          .onClick(() => this.query(this.inputDomain))
-      }
-      .width('92%')
+          .onSubmit((value: string) => {
+            this.query(value);
+          })
 
-      Flex({ wrap: FlexWrap.Wrap, space: { main: LengthMetrics.vp(8), cross: LengthMetrics.vp(8) } }) {
-        ForEach(this.samples, (chip: SampleChip) => {
-          this.sampleChip(chip)
-        }, (chip: SampleChip) => chip.domain)
-      }
-      .width('92%')
+        Flex({ wrap: FlexWrap.Wrap, space: { main: LengthMetrics.vp(8), cross: LengthMetrics.vp(8) } }) {
+          ForEach(this.samples, (chip: SampleChip) => {
+            this.sampleChip(chip)
+          }, (chip: SampleChip) => chip.domain)
+        }
+        .width('92%')
 
-      if (this.emptyNotice !== '') {
-        Text(this.emptyNotice)
-          .fontSize(13)
-          .fontColor($r('app.color.warn'))
-          .width('92%')
-      }
+        if (this.emptyNotice !== '') {
+          Text(this.emptyNotice)
+            .fontSize(13)
+            .fontColor($r('app.color.warn'))
+            .width('92%')
+        }
 
-      if (this.result !== null) {
-        Column({ space: 10 }) {
-          Row({ space: 10 }) {
-            Text(this.result.action === 'BLOCK' ? '⛔' :
-              (this.result.action === 'ALLOW' ? '✅' : '➖'))
-              .fontSize(28)
-            Column({ space: 2 }) {
-              Text(this.result.action === 'BLOCK' ? '阻断' :
-                (this.result.action === 'ALLOW' ? '放行（白名单）' : '未命中'))
-                .fontSize(20)
-                .fontWeight(FontWeight.Bold)
-                .fontColor(this.result.action === 'BLOCK' ? $r('app.color.danger') :
-                  (this.result.action === 'ALLOW' ? $r('app.color.safe') : $r('app.color.text_secondary')))
-              Text(this.inputDomain)
+        if (this.result !== null) {
+          Column({ space: 10 }) {
+            Row({ space: 10 }) {
+              SymbolGlyph(this.verdictAction())
+                .fontSize(28)
+                .fontColor([this.verdictColor()])
+              Column({ space: 2 }) {
+                Text(this.verdictLabel())
+                  .fontSize(20)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor(this.verdictColor())
+                Text(this.inputDomain)
+                  .fontSize(13)
+                  .fontColor($r('app.color.text_secondary'))
+              }
+              .alignItems(HorizontalAlign.Start)
+            }
+            .width('100%')
+
+            Divider().color($r('app.color.divider'))
+
+            Column({ space: 6 }) {
+              Text(`命中规则：${this.result.rule === '' ? '（无）' : this.result.rule}`)
                 .fontSize(13)
-                .fontColor($r('app.color.text_secondary'))
+                .fontColor($r('app.color.text_primary'))
+                .width('100%')
+              Text(`来源订阅：${this.result.list === '' ? '（无）' : this.result.list}`)
+                .fontSize(13)
+                .fontColor($r('app.color.text_primary'))
+                .width('100%')
             }
             .alignItems(HorizontalAlign.Start)
           }
-          .width('100%')
-
-          Divider().color($r('app.color.divider'))
-
-          Column({ space: 6 }) {
-            Text(`命中规则：${this.result.rule === '' ? '（无）' : this.result.rule}`)
-              .fontSize(13)
-              .fontColor($r('app.color.text_primary'))
-              .width('100%')
-            Text(`来源订阅：${this.result.list === '' ? '（无）' : this.result.list}`)
-              .fontSize(13)
-              .fontColor($r('app.color.text_primary'))
-              .width('100%')
-          }
+          .width('92%')
+          .padding(16)
+          .borderRadius(16)
+          .backgroundColor($r('app.color.card_bg'))
           .alignItems(HorizontalAlign.Start)
         }
-        .width('92%')
-        .padding(16)
-        .borderRadius(16)
-        .backgroundColor($r('app.color.card_bg'))
-        .alignItems(HorizontalAlign.Start)
       }
+      .width('100%')
+      .alignItems(HorizontalAlign.Center)
+      // 底部留白（规范：短内容不强行撑高，留系统导航条空间即可）。
+      .padding({ bottom: 24 })
     }
-    .width('100%')
-    .height('100%')
-    .alignItems(HorizontalAlign.Center)
+    .title('匹配自检')
+    .backgroundColor($r('app.color.app_bg'))
   }
+
+  private samples: SampleChip[] = [
+    { domain: 'doubleclick.net', expect: '应阻断' },
+    { domain: 'google-analytics.com', expect: '应阻断' },
+    { domain: 'alipay.com', expect: '白名单放行' },
+    { domain: 'baidu.com', expect: '未命中' }
+  ];
 }

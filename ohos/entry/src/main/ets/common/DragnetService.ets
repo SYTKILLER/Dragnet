@@ -6,7 +6,7 @@
 //   UI 侧 readVpnSnapshot() 读该文件，ts 超过 STATE_STALE_SEC 判定"未运行"
 //   （VPN 扩展进程被系统杀死、未走 onDestroy 时也能正确降级）。
 
-import fs from '@ohos.file.fs';
+import { fileIo as fs } from '@kit.CoreFileKit';
 import { loadRules, ruleInfo, match } from 'libdragnet.so';
 
 /** 内核运行统计（cmd/dragnetohos stats() JSON 字段）。 */

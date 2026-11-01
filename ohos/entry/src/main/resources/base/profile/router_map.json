@@ -1,0 +1,9 @@
+{
+  "routerMap": [
+    {
+      "name": "MatchTest",
+      "pageSourceFile": "src/main/ets/pages/MatchTestPage.ets",
+      "buildFunction": "MatchTestPageBuilder"
+    }
+  ]
+}

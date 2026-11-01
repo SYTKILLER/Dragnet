@@ -15,7 +15,7 @@ import { Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { connection } from '@kit.NetworkKit';
-import fs from '@ohos.file.fs';
+import { fileIo as fs } from '@kit.CoreFileKit';
 import { startVpn, stopVpn, setProtected, loadRules, stats } from 'libdragnet.so';
 import { readDnsUp, RunStats, VpnStateFile } from '../common/DragnetService';
 
@@ -55,7 +55,7 @@ export default class VpnExtAbility extends VpnExtensionAbility {
     // M4-R1 规则可见性：规则仅从 filesDir/rules 外部加载，无内嵌种子；
     // 未加载时空载 fail-open（内核侧 WARN）。
     const rulesRc: number = loadRules(filesDir + '/rules');
-    console.info(`[Dragnet] loadRules(${filesDir}/rules) = ${rulesRc}`);
+    console.info(`[VPN] loadRules(${filesDir}/rules) = ${rulesRc}`);
 
     // 出站 DNS 上游：设置页可改（filesDir/config/dns-up.txt），缺省回退。
     const dnsUp: string = readDnsUp(filesDir);
@@ -83,26 +83,26 @@ export default class VpnExtAbility extends VpnExtensionAbility {
     };
 
     this.conn.create(config).then((tunFd: number) => {
-      console.info(`[Dragnet] VpnConnection.create -> tunFd=${tunFd}`);
+      console.info(`[VPN] VpnConnection.create -> tunFd=${tunFd}`);
       startVpn(tunFd, dnsUp, MTU, (id: number, fd: number): void => {
         this.conn?.protect(fd).then((): void => {
-          console.info(`[Dragnet] protect fd=${fd} ok`);
+          console.info(`[VPN] protect fd=${fd} ok`);
           setProtected(id);
         }).catch((err: BusinessError): void => {
           // 失败也回握：让内核放弃该次拨号（防回环），而非干等 5s 超时。
-          console.info(`[Dragnet] protect fd=${fd} failed: ${err.message}`);
+          console.info(`[VPN] protect fd=${fd} failed: ${err.message}`);
           setProtected(id);
         });
       }).then((rc: number) => {
-        console.info(`[Dragnet] startVpn = ${rc}`);
+        console.info(`[VPN] startVpn = ${rc}`);
         if (rc === 0) {
           this.startStatsWriter();
         }
       }).catch((err: BusinessError) => {
-        console.info(`[Dragnet] startVpn rejected: ${err.message}`);
+        console.info(`[VPN] startVpn rejected: ${err.message}`);
       });
     }).catch((err: BusinessError) => {
-      console.info(`[Dragnet] VpnConnection.create failed: ${err.message}`);
+      console.info(`[VPN] VpnConnection.create failed: ${err.message}`);
     });
   }
 
@@ -115,7 +115,7 @@ export default class VpnExtAbility extends VpnExtensionAbility {
         fs.mkdirSync(stateDir, true);
       }
     } catch (e) {
-      console.info('[Dragnet] state dir create failed');
+      console.info('[VPN] state dir create failed');
       return;
     }
     this.statsTimer = setInterval((): void => {
@@ -132,7 +132,7 @@ export default class VpnExtAbility extends VpnExtensionAbility {
         fs.writeSync(file.fd, JSON.stringify(sf));
         fs.closeSync(file);
       } catch (e) {
-        console.info('[Dragnet] stats dump failed');
+        console.info('[VPN] stats dump failed');
       }
     }, STATS_DUMP_INTERVAL_MS);
     // 立即写一次，UI 无需等第一个周期
@@ -153,7 +153,7 @@ export default class VpnExtAbility extends VpnExtensionAbility {
       fs.writeSync(file.fd, JSON.stringify(sf));
       fs.closeSync(file);
     } catch (e) {
-      console.info('[Dragnet] stats dump (once) failed');
+      console.info('[VPN] stats dump (once) failed');
     }
   }
 
@@ -174,19 +174,19 @@ export default class VpnExtAbility extends VpnExtensionAbility {
       fs.writeSync(file.fd, JSON.stringify(sf));
       fs.closeSync(file);
     } catch (e) {
-      console.info('[Dragnet] stopped-state dump failed');
+      console.info('[VPN] stopped-state dump failed');
     }
   }
 
   onDestroy(): void {
-    console.info('[Dragnet] VpnExtAbility onDestroy');
+    console.info('[VPN] VpnExtAbility onDestroy');
     this.stopStatsWriter();
     const rc: number = stopVpn();
-    console.info(`[Dragnet] stopVpn = ${rc}`);
+    console.info(`[VPN] stopVpn = ${rc}`);
     this.conn?.destroy().then((): void => {
-      console.info('[Dragnet] VpnConnection.destroy ok');
+      console.info('[VPN] VpnConnection.destroy ok');
     }).catch((err: BusinessError): void => {
-      console.info(`[Dragnet] VpnConnection.destroy failed: ${err.message}`);
+      console.info(`[VPN] VpnConnection.destroy failed: ${err.message}`);
     });
     this.conn = null;
   }

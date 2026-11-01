@@ -55,6 +55,10 @@
     {
       "name": "warn",
       "value": "#E0A050"
+    },
+    {
+      "name": "card_shadow",
+      "value": "#40000000"
     }
   ]
 }
