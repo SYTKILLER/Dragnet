@@ -95,19 +95,13 @@ export struct DashboardPage {
   build() {
     Scroll() {
       Column({ space: 16 }) {
-        // 顶部标题
-        Row() {
-          Text('罗网')
-            .fontSize(28)
-            .fontWeight(FontWeight.Bold)
-            .fontColor($r('app.color.text_primary'))
-          Text(' Dragnet')
-            .fontSize(16)
-            .fontColor($r('app.color.text_secondary'))
-            .margin({ left: 6, top: 8 })
-        }
-        .width('100%')
-        .margin({ top: 16 })
+        // 顶部标题（与统计/规则/设置页同一样式：22 加粗单行）
+        Text('罗网 Dragnet')
+          .fontSize(22)
+          .fontWeight(FontWeight.Bold)
+          .fontColor($r('app.color.text_primary'))
+          .width('92%')
+          .margin({ top: 16, bottom: 12 })
 
         // 状态主卡（图标 SymbolGlyph：checkmark_shield_fill 运行 / security_shield 未运行）
         Column({ space: 12 }) {
