@@ -16,6 +16,7 @@
 //	setProtected(id): void
 //	loadRules(dir): number
 //	stats(): string（未运行返回 ""）
+//	ruleInfo(): string（JSON：{lists, rule_lines, rule_bytes}；未加载返回 ""）
 //	match(domain): string（JSON：{action, rule, list}）
 //
 // 出站防回环——protect 回握协议（与 ClashBox 同型，ClashBox 实测 JS 事件循环
@@ -156,6 +157,21 @@ func stats(env js.Env, this js.Value, args []js.Value) any {
 	return out
 }
 
+// ruleInfo 返回当前已加载规则的规模信息 JSON（未加载返回 ""）。
+// 供壳 UI 的规则页展示（列表数/规则行数/规则字节数），无网络副作用。
+func ruleInfo(env js.Env, this js.Value, args []js.Value) any {
+	holderMu.Lock()
+	e := holder.Current()
+	holderMu.Unlock()
+	if e == nil {
+		return ""
+	}
+	s := e.Stats()
+	out := fmt.Sprintf(`{"lists":%d,"rule_lines":%d,"rule_bytes":%d}`,
+		s.Lists, s.RuleLines, s.RuleTextBytes)
+	return out
+}
+
 // match 按域名查询当前引擎（无网络副作用，供壳内自检/排障）。
 // 返回 JSON：{"action":..,"rule":..,"list":..}。
 func match(env js.Env, this js.Value, args []js.Value) any {
@@ -181,6 +197,7 @@ func init() {
 	entry.Export("setProtected", js.AsCallback(setProtected))
 	entry.Export("loadRules", js.AsCallback(loadRules))
 	entry.Export("stats", js.AsCallback(stats))
+	entry.Export("ruleInfo", js.AsCallback(ruleInfo))
 	entry.Export("match", js.AsCallback(match))
 }
 

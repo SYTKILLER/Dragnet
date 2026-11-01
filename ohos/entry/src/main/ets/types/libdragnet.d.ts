@@ -28,6 +28,9 @@ declare module 'libdragnet.so' {
   /** 运行统计 JSON；未运行返回 ""。 */
   export const stats: () => string;
 
+  /** 已加载规则规模 JSON {lists, rule_lines, rule_bytes}；引擎空载返回 ""。 */
+  export const ruleInfo: () => string;
+
   /** 域名匹配自检（无网络副作用）；引擎空载返回 ""，否则 JSON {action,rule,list}。 */
   export const match: (domain: string) => string;
 }

@@ -11,6 +11,38 @@
     {
       "name": "EntryAbility_label",
       "value": "罗网"
+    },
+    {
+      "name": "tab_dashboard",
+      "value": "首页"
+    },
+    {
+      "name": "tab_stats",
+      "value": "统计"
+    },
+    {
+      "name": "tab_rules",
+      "value": "规则"
+    },
+    {
+      "name": "tab_settings",
+      "value": "设置"
+    },
+    {
+      "name": "btn_start_block",
+      "value": "启动拦截"
+    },
+    {
+      "name": "btn_stop_block",
+      "value": "停止拦截"
+    },
+    {
+      "name": "state_running",
+      "value": "拦截运行中"
+    },
+    {
+      "name": "state_stopped",
+      "value": "未运行"
     }
   ]
 }
