@@ -90,3 +90,7 @@ ohos/build/
 ohos/**/*.hap
 !ohos/AppScope/resources/base/media/*.png
 !ohos/entry/src/main/resources/base/media/*.png
+
+# --- Go workspace（本机 replace 不入库，见 ohos/README.md gvisor 补丁节）---
+go.work
+go.work.sum
