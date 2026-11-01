@@ -40,6 +40,10 @@ export struct DashboardPage {
   }
 
   private startBlock(): void {
+    // 即时反馈：startVpnExtensionAbility 的 Promise 在授权对话框缺失/等待期间
+    // 可能长时间不落定（模拟器实测 netmanager 每 10s 重试 vpndialog），
+    // 若只依赖 then/catch 用户会以为点击无效。
+    this.actionMsg = '正在启动…（首次会弹系统授权对话框）';
     vpnExtension.startVpnExtensionAbility(this.vpnWant).then((): void => {
       this.actionMsg = 'VPN 扩展启动成功（首次会弹系统授权对话框）';
       hilog.info(DOMAIN, TAG, 'startVpnExtensionAbility ok');
@@ -50,6 +54,7 @@ export struct DashboardPage {
   }
 
   private stopBlock(): void {
+    this.actionMsg = '正在停止…';
     vpnExtension.stopVpnExtensionAbility(this.vpnWant).then((): void => {
       this.actionMsg = 'VPN 扩展已停止';
       hilog.info(DOMAIN, TAG, 'stopVpnExtensionAbility ok');

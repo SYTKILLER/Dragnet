@@ -19,7 +19,13 @@ export struct SettingsPage {
   private save(): void {
     const value = this.dnsInput.trim();
     if (value === '') {
-      this.saveMsg = '不能为空（留空恢复默认请直接填 ' + DEFAULT_DNS_UP + '）';
+      this.saveMsg = '不能为空（默认 ' + DEFAULT_DNS_UP + '）';
+      return;
+    }
+    // 内核侧 netip.ParseAddrPort 只接受 ip:port，格式不对会导致内核起不来
+    //（仅 hilog 可见），在保存入口先拦住。
+    if (!/^\d{1,3}(\.\d{1,3}){3}:\d{1,5}$/.test(value)) {
+      this.saveMsg = '格式应为 ip:port（IPv4，如 223.5.5.5:53）';
       return;
     }
     const ctx = getContext(this) as common.UIAbilityContext;
