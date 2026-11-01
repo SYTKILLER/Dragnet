@@ -45,14 +45,31 @@ ArkTS 只做四件事——create 拿 tun fd、注册 protect 回调、分发种
 ## 构建与安装
 
 ```bash
-bash scripts/build-ohos.sh          # 交叉编译 libdragnet.so（x86_64，模拟器架构）
-bash scripts/build-ohos-hap.sh      # 拷 .so+rawfile → 注入签名 → devecocli build → 安装
+bash scripts/build-ohos.sh          # 交叉编译 libdragnet.so（x86_64 模拟器 + arm64-v8a 真机）
+bash scripts/build-ohos-hap.sh      # 拷双 ABI .so+rawfile → 注入签名 → devecocli build → 安装
 # 或手动：
 cp build/ohos/x86_64/libdragnet.so ohos/entry/libs/x86_64/
+cp build/ohos/arm64-v8a/libdragnet.so ohos/entry/libs/arm64-v8a/
 cp rules/starter.txt rules/protected-allow.txt ohos/entry/src/main/resources/rawfile/rules/
 cd ohos && devecocli build
 hdc install entry/build/default/outputs/default/entry-default-signed.hap
 ```
+
+### gvisor 本地补丁（真机必需，每台构建机一次）
+
+真机（HarmonyOS app 沙箱）对 netmanager 转交的 VPN tun fd 拒绝 `fstat(2)`
+（EPERM），上游 gvisor `fdbased.IsSocketFD` 因此中止 `stack.Start`
+（`startVpn rc=-17`，2026-11-01 Pura 90 实测定位）。补丁把 fstat 失败按
+"非 socket"放行（tun fd 本就不是 packet socket）。补丁不进仓库，与本机
+工具链同模式：
+
+```bash
+bash scripts/patch-gvisor.sh   # 复制钉住版本到 D:/research/gvisor-dragnet 并打补丁
+                               # + 生成 go.work（已在 .gitignore，勿提交）
+```
+
+缺脚本一步时表现为：`startVpn = -17`，lastError 含
+`unix.Fstat(N,...) failed: permission denied`。
 
 ## 验证（模拟器，虚拟设备零接触宿主机网络）
 

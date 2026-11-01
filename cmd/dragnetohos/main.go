@@ -73,6 +73,11 @@ var (
 	runStart time.Time
 	runStats *tunstack.Handler
 
+	// 最近一次 startVpn 失败的底层错误文本（lastError() 导出；hilog 内核
+	// 通道不可靠，JS 侧经此取原因写 console/状态文件）。
+	lastErrMu     sync.Mutex
+	lastStartErr  string
+
 	// protect 回握状态
 	protectTsfn atomic.Pointer[js.TsFunc] // nil 表示未注册（protect 直接放行；atomic：注册在 JS 线程、消费在内核 goroutine）
 	protectSeq  atomic.Int64
@@ -191,6 +196,15 @@ func match(env js.Env, this js.Value, args []js.Value) any {
 	return string(b)
 }
 
+// lastError 返回最近一次 startVpn 失败的底层错误文本（成功/从未失败返回 ""）。
+// 内核 hilog 通道（OH_LOG_Print）在真机/模拟器扩展进程均不可靠，JS 侧经此
+// 把原因写 console 与跨进程状态文件。
+func lastError(env js.Env, this js.Value, args []js.Value) any {
+	lastErrMu.Lock()
+	defer lastErrMu.Unlock()
+	return lastStartErr
+}
+
 func init() {
 	entry.Export("startVpn", js.AsCallback(startVpn))
 	entry.Export("stopVpn", js.AsCallback(stopVpn))
@@ -199,15 +213,23 @@ func init() {
 	entry.Export("stats", js.AsCallback(stats))
 	entry.Export("ruleInfo", js.AsCallback(ruleInfo))
 	entry.Export("match", js.AsCallback(match))
+	entry.Export("lastError", js.AsCallback(lastError))
 }
 
 // ---- 内核起停 ----
+
+func setStartErr(rc int, why string) {
+	lastErrMu.Lock()
+	lastStartErr = fmt.Sprintf("rc=%d %s", rc, why)
+	lastErrMu.Unlock()
+}
 
 func startVPN(fd int, dnsUp string, mtu int) (rc int) {
 	defer func() {
 		if r := recover(); r != nil {
 			_ = r
 			rc = -99
+			setStartErr(-99, fmt.Sprint(r))
 		}
 	}()
 	runMu.Lock()
@@ -217,9 +239,11 @@ func startVPN(fd int, dnsUp string, mtu int) (rc int) {
 	}
 	up, err := netip.ParseAddrPort(dnsUp)
 	if err != nil {
+		setStartErr(-11, err.Error())
 		return -11
 	}
 	if fd <= 0 {
+		setStartErr(-12, fmt.Sprintf("fd=%d", fd))
 		return -12
 	}
 	if mtu <= 0 {
@@ -254,6 +278,8 @@ func startVPN(fd int, dnsUp string, mtu int) (rc int) {
 	}
 	dev, err := tun.New(options)
 	if err != nil {
+		olog.Error("startVpn: tun.New failed(-14): ", err)
+		setStartErr(-14, err.Error())
 		return -14
 	}
 	stack, err := tun.NewStack("gvisor", tun.StackOptions{
@@ -265,12 +291,18 @@ func startVPN(fd int, dnsUp string, mtu int) (rc int) {
 		UDPTimeout: 5 * time.Minute,
 	})
 	if err != nil {
+		olog.Error("startVpn: tun.NewStack failed(-15): ", err)
+		setStartErr(-15, err.Error())
 		return -15
 	}
 	if err := dev.Start(); err != nil {
+		olog.Error("startVpn: dev.Start failed(-16): ", err)
+		setStartErr(-16, err.Error())
 		return -16
 	}
 	if err := stack.Start(); err != nil {
+		olog.Error("startVpn: stack.Start failed(-17): ", err)
+		setStartErr(-17, err.Error())
 		return -17
 	}
 	runDev, runStack, runStats = dev, stack, h

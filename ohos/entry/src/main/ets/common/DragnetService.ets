@@ -37,9 +37,11 @@ export interface MatchResult {
 
 /** filesDir/state/stats.json 的落盘结构（VpnExtAbility 写、UI 读）。 */
 export interface VpnStateFile {
-  state: string; // running | stopped
+  state: string; // running | stopped | error
   ts: number; // 写盘时刻（epoch 秒）
   stats: RunStats | null;
+  errRc?: number; // state=error 时的内核 startVpn 返回码（负数）
+  errMsg?: string; // state=error 时的底层错误文本（内核 lastError()）
 }
 
 /** UI 侧视角的 VPN 运行快照。 */
@@ -47,6 +49,8 @@ export interface VpnSnapshot {
   running: boolean;
   stats: RunStats | null;
   lastTs: number; // VPN 侧最近写盘时间（秒）；0 = 从未写过
+  errorRc: number; // 非 0 = VPN 侧上报的内核启动失败返回码（终态，直到下次写盘）
+  errMsg: string; // 底层错误文本（"" = 无）
 }
 
 // 超过该秒数未见 VPN 侧刷新即判未运行（写盘周期 2s，留 5 倍余量）。
@@ -54,7 +58,7 @@ const STATE_STALE_SEC = 10;
 
 /** 读跨进程状态文件并判活；文件缺失/损坏一律按未运行处理。 */
 export function readVpnSnapshot(filesDir: string): VpnSnapshot {
-  let snap: VpnSnapshot = { running: false, stats: null, lastTs: 0 };
+  let snap: VpnSnapshot = { running: false, stats: null, lastTs: 0, errorRc: 0, errMsg: '' };
   try {
     const text: string = fs.readTextSync(filesDir + '/state/stats.json');
     const sf: VpnStateFile = JSON.parse(text) as VpnStateFile;
@@ -65,6 +69,10 @@ export function readVpnSnapshot(filesDir: string): VpnSnapshot {
         snap.running = true;
         snap.stats = sf.stats;
       }
+    } else if (sf.state === 'error' && typeof sf.errRc === 'number') {
+      // 内核启动失败终态：UI 显示明确错误而非笼统"未运行"
+      snap.errorRc = sf.errRc;
+      snap.errMsg = sf.errMsg ?? '';
     }
   } catch (e) {
     // 首次安装（VPN 未起过）或文件损坏 → 未运行
@@ -189,4 +197,33 @@ export function loadRulesErrorText(rc: number): string {
     return '加载失败：规则目录不可读';
   }
   return '加载失败：规则文件解析错误（保留原引擎，空载 fail-open）';
+}
+
+/** 内核 startVpn 返回码转可读文案（与 cmd/dragnetohos/main.go 对齐）。 */
+export function startVpnErrorText(rc: number): string {
+  if (rc === -10) {
+    return '内核已在运行';
+  }
+  if (rc === -11) {
+    return 'DNS 上游格式错误（设置页检查）';
+  }
+  if (rc === -12) {
+    return 'TUN 文件描述符无效';
+  }
+  if (rc === -14) {
+    return 'TUN 设备创建失败';
+  }
+  if (rc === -15) {
+    return '网络栈构建失败';
+  }
+  if (rc === -16) {
+    return 'TUN 设备启动失败';
+  }
+  if (rc === -17) {
+    return '网络栈启动失败';
+  }
+  if (rc === -99) {
+    return '内核异常（panic）';
+  }
+  return `内核启动失败（错误码 ${rc}）`;
 }

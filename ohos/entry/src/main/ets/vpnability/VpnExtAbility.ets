@@ -16,7 +16,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { connection } from '@kit.NetworkKit';
 import { fileIo as fs } from '@kit.CoreFileKit';
-import { startVpn, stopVpn, setProtected, loadRules, stats } from 'libdragnet.so';
+import { startVpn, stopVpn, setProtected, loadRules, stats, lastError } from 'libdragnet.so';
 import { readDnsUp, RunStats, VpnStateFile } from '../common/DragnetService';
 
 const DOMAIN = 0xD22E0;
@@ -97,9 +97,16 @@ export default class VpnExtAbility extends VpnExtensionAbility {
         console.info(`[VPN] startVpn = ${rc}`);
         if (rc === 0) {
           this.startStatsWriter();
+        } else {
+          // 内核启动失败：取底层错误文本（lastError，见 main.go）写 console
+          // 与 error 终态（UI 显示明确原因而非笼统"未运行"）
+          const why: string = lastError();
+          console.info(`[VPN] startVpn failed why: ${why}`);
+          this.writeStateFile('error', null, rc, why);
         }
       }).catch((err: BusinessError) => {
         console.info(`[VPN] startVpn rejected: ${err.message}`);
+        this.writeStateFile('error', null, -98, err.message);
       });
     }).catch((err: BusinessError) => {
       console.info(`[VPN] VpnConnection.create failed: ${err.message}`);
@@ -122,38 +129,33 @@ export default class VpnExtAbility extends VpnExtensionAbility {
       try {
         const raw: string = stats();
         const st: RunStats | null = raw === '' ? null : JSON.parse(raw) as RunStats;
-        const sf: VpnStateFile = {
-          state: 'running',
-          ts: Math.floor(Date.now() / 1000),
-          stats: st
-        };
-        const file = fs.openSync(stateDir + '/stats.json',
-          fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
-        fs.writeSync(file.fd, JSON.stringify(sf));
-        fs.closeSync(file);
+        this.writeStateFile('running', st, 0);
       } catch (e) {
         console.info('[VPN] stats dump failed');
       }
     }, STATS_DUMP_INTERVAL_MS);
     // 立即写一次，UI 无需等第一个周期
-    this.dumpStatsOnce(stateDir);
+    this.writeStateFile('running', null, 0);
   }
 
-  private dumpStatsOnce(stateDir: string): void {
+  // writeStateFile 统一状态落盘（running 周期/立即写、stopped/error 终态）。
+  private writeStateFile(state: string, st: RunStats | null, errRc: number,
+    errMsg: string = '', stateDir: string = this.context.filesDir + '/state'): void {
     try {
-      const raw: string = stats();
-      const st: RunStats | null = raw === '' ? null : JSON.parse(raw) as RunStats;
-      const sf: VpnStateFile = {
-        state: 'running',
-        ts: Math.floor(Date.now() / 1000),
-        stats: st
-      };
+      if (!fs.accessSync(stateDir)) {
+        fs.mkdirSync(stateDir, true);
+      }
+      const sf: VpnStateFile = { state: state, ts: Math.floor(Date.now() / 1000), stats: st };
+      if (state === 'error') {
+        sf.errRc = errRc;
+        sf.errMsg = errMsg;
+      }
       const file = fs.openSync(stateDir + '/stats.json',
         fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
       fs.writeSync(file.fd, JSON.stringify(sf));
       fs.closeSync(file);
     } catch (e) {
-      console.info('[VPN] stats dump (once) failed');
+      console.info(`[VPN] state dump (${state}) failed`);
     }
   }
 
@@ -163,19 +165,7 @@ export default class VpnExtAbility extends VpnExtensionAbility {
       clearInterval(this.statsTimer);
       this.statsTimer = -1;
     }
-    try {
-      const sf: VpnStateFile = {
-        state: 'stopped',
-        ts: Math.floor(Date.now() / 1000),
-        stats: null
-      };
-      const file = fs.openSync(this.context.filesDir + '/state/stats.json',
-        fs.OpenMode.READ_WRITE | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
-      fs.writeSync(file.fd, JSON.stringify(sf));
-      fs.closeSync(file);
-    } catch (e) {
-      console.info('[VPN] stopped-state dump failed');
-    }
+    this.writeStateFile('stopped', null, 0);
   }
 
   onDestroy(): void {

@@ -33,4 +33,7 @@ declare module 'libdragnet.so' {
 
   /** 域名匹配自检（无网络副作用）；引擎空载返回 ""，否则 JSON {action,rule,list}。 */
   export const match: (domain: string) => string;
+
+  /** 最近一次 startVpn 失败的底层错误文本（成功启动或从未失败返回 ""）。 */
+  export const lastError: () => string;
 }

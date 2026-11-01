@@ -11,7 +11,7 @@ import { vpnExtension } from '@kit.NetworkKit';
 import { Want, common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { readVpnSnapshot, formatUptime, VpnSnapshot } from '../common/DragnetService';
+import { readVpnSnapshot, formatUptime, startVpnErrorText, VpnSnapshot } from '../common/DragnetService';
 
 const DOMAIN = 0xD22E0;
 
@@ -39,7 +39,7 @@ struct StatTile {
 
 @Component
 export struct DashboardPage {
-  @State snapshot: VpnSnapshot = { running: false, stats: null, lastTs: 0 };
+  @State snapshot: VpnSnapshot = { running: false, stats: null, lastTs: 0, errorRc: 0, errMsg: '' };
   @State actionMsg: string = '';
   private timerId: number = -1;
   private vpnWant: Want = {
@@ -126,6 +126,13 @@ export struct DashboardPage {
               .fontSize(13)
               .fontColor($r('app.color.text_secondary'))
           }
+          if (!this.snapshot.running && this.snapshot.errorRc !== 0) {
+            Text(this.snapshot.errMsg !== ''
+              ? this.snapshot.errMsg
+              : startVpnErrorText(this.snapshot.errorRc))
+              .fontSize(13)
+              .fontColor($r('app.color.danger'))
+          }
         }
         .width('92%')
         .padding({ top: 28, bottom: 28 })
@@ -133,7 +140,9 @@ export struct DashboardPage {
         .backgroundColor($r('app.color.card_bg'))
         .shadow({ radius: 12, color: $r('app.color.card_shadow'), offsetY: 2 })
 
-        // 开关（启动 play_fill / 停止 stop_circle_fill，SymbolGlyph 图标随按钮）
+        // 开关（启动 play_fill / 停止 stop_circle_fill，SymbolGlyph 图标随按钮）。
+        // 停止按钮常驻：VPN 扩展可能处于"半活"状态（如内核启动失败但系统
+        // VPN 连接仍在），此时状态非 running 也必须能从应用内拆除。
         if (this.snapshot.running) {
           Button($r('app.string.btn_stop_block'))
             .width('92%')
@@ -152,6 +161,15 @@ export struct DashboardPage {
             .type(ButtonType.Capsule)
             .backgroundColor($r('app.color.primary'))
             .onClick(() => this.startBlock())
+          Button($r('app.string.btn_stop_block'))
+            .width('92%')
+            .height(40)
+            .fontSize(15)
+            .fontWeight(FontWeight.Normal)
+            .type(ButtonType.Capsule)
+            .backgroundColor(Color.Transparent)
+            .fontColor($r('app.color.danger'))
+            .onClick(() => this.stopBlock())
         }
 
         // DNS 阻断/放行占比（DataPanel 环形，标准 ArkUI 组件）

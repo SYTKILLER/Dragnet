@@ -38,7 +38,7 @@ struct CounterCell {
 
 @Component
 export struct StatsPage {
-  @State snapshot: VpnSnapshot = { running: false, stats: null, lastTs: 0 };
+  @State snapshot: VpnSnapshot = { running: false, stats: null, lastTs: 0, errorRc: 0, errMsg: '' };
   @State isRefreshing: boolean = false;
   private timerId: number = -1;
 
