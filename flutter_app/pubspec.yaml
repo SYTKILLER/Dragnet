@@ -1,0 +1,32 @@
+name: dragnet_app
+description: "罗网 Dragnet Flutter Android GUI（液态玻璃设计语言）"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.7
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # 真折射透镜（浮出面板钉死这一档）。钉死 4.1.1 —— 4.3.1+ 在部分平台首帧白屏
+  # （复现指南 §1.1）；5.x 重构了 API，未按指南标定，不追新。
+  liquid_glass_easy: 4.1.1
+
+  # 页面 chrome（底栏/玻璃胶囊）。0.30.x 为指南标定的 API 线
+  # （GlassBottomBarExtraButton → GlassTabBarExtraButton 等差异见指南文末注）。
+  liquid_glass_widgets: 0.30.2
+
+  # 主题种子色（系统动态取色）
+  dynamic_color: ^1.7.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

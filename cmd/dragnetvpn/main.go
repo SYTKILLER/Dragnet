@@ -172,6 +172,76 @@ func Java_com_dragnet_app_DragnetNative_nativeStats(env *C.JNIEnv, thiz C.jobjec
 	return C.dg_new_jstr(env, cs)
 }
 
+// nativeRuleInfo 返回当前已加载规则的规模信息 JSON {lists,rule_lines,rule_bytes}
+// （对齐 cmd/dragnetohos 的 ruleInfo；未加载返回 null）。无网络副作用。
+//
+//export Java_com_dragnet_app_DragnetNative_nativeRuleInfo
+func Java_com_dragnet_app_DragnetNative_nativeRuleInfo(env *C.JNIEnv, thiz C.jobject) (rs C.jstring) {
+	defer recoverStats(&rs)
+	holderMu.Lock()
+	e := holder.Current()
+	holderMu.Unlock()
+	if e == nil {
+		var jnil C.jstring
+		return jnil
+	}
+	s := e.Stats()
+	cs := C.CString(fmt.Sprintf(`{"lists":%d,"rule_lines":%d,"rule_bytes":%d}`,
+		s.Lists, s.RuleLines, s.RuleTextBytes))
+	defer C.free(unsafe.Pointer(cs))
+	return C.dg_new_jstr(env, cs)
+}
+
+// nativeMatch 按域名查询当前引擎（无网络副作用，供壳内自检/排障，对齐
+// cmd/dragnetohos 的 match）。返回 JSON {"action","rule","list"}；引擎空载或
+// 域名为空返回 null。
+//
+//export Java_com_dragnet_app_DragnetNative_nativeMatch
+func Java_com_dragnet_app_DragnetNative_nativeMatch(env *C.JNIEnv, thiz C.jobject, domain C.jstring) (rs C.jstring) {
+	defer recoverStats(&rs)
+	cs := C.dg_jstr(env, domain)
+	defer C.dg_release_jstr(env, domain, cs)
+	if cs == nil {
+		var jnil C.jstring
+		return jnil
+	}
+	holderMu.Lock()
+	h := holder
+	holderMu.Unlock()
+	if h.Current() == nil {
+		var jnil C.jstring
+		return jnil
+	}
+	res := matchHolder(&h, C.GoString(cs))
+	cs2 := C.CString(fmt.Sprintf(`{"action":"%s","rule":"%s","list":"%s"}`,
+		res.Action, jsonEscape(res.RuleText), jsonEscape(res.List)))
+	defer C.free(unsafe.Pointer(cs2))
+	return C.dg_new_jstr(env, cs2)
+}
+
+// jsonEscape 极简 JSON 字符串转义（规则原文含引号/反斜杠/控制符时保真）。
+func jsonEscape(s string) string {
+	buf := make([]byte, 0, len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '"' || c == '\\':
+			buf = append(buf, '\\', c)
+		case c == '\n':
+			buf = append(buf, '\\', 'n')
+		case c == '\r':
+			buf = append(buf, '\\', 'r')
+		case c == '\t':
+			buf = append(buf, '\\', 't')
+		case c < 0x20:
+			buf = append(buf, fmt.Sprintf(`\u%04x`, c)...)
+		default:
+			buf = append(buf, c)
+		}
+	}
+	return string(buf)
+}
+
 // ---- 规则匹配 C ABI（与 JNI 共存，供测试与未来 NAPI 复用）----
 
 // DragnetLoadRules 从目录加载全部 .txt 规则并原子切换当前引擎；0 成功。
