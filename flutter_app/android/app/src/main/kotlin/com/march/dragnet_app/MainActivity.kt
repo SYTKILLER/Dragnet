@@ -38,6 +38,36 @@ class MainActivity : FlutterActivity() {
                     )
                     "rulesDir" -> result.success(File(filesDir, "rules").absolutePath)
                     "lastStartRc" -> result.success(com.dragnet.app.DragnetVpnService.lastStartRc)
+                    // 以下三个 JNI 调用包 try/catch UnsatisfiedLinkError：
+                    // 旧 libdragnet.so 可能未含新符号，缺失时降级返回 null/-99，
+                    // 防止壳进程崩溃。
+                    "logs" -> result.success(
+                        try {
+                            // Dart int 经标准编解码可能是 Integer 或 Long，统一取 Number。
+                            com.dragnet.app.DragnetNative.nativeLogs(
+                                call.argument<Number>("cursor")?.toLong() ?: 0L
+                            )
+                        } catch (e: UnsatisfiedLinkError) {
+                            null
+                        }
+                    )
+                    "lastError" -> result.success(
+                        try {
+                            com.dragnet.app.DragnetNative.nativeLastError()
+                        } catch (e: UnsatisfiedLinkError) {
+                            null
+                        }
+                    )
+                    "reloadRules" -> result.success(
+                        try {
+                            // 复用既有 nativeLoadRules 导出（无新符号）。
+                            com.dragnet.app.DragnetNative.nativeLoadRules(
+                                call.argument<String>("dir") ?: ""
+                            )
+                        } catch (e: UnsatisfiedLinkError) {
+                            -99
+                        }
+                    )
                     else -> result.notImplemented()
                 }
             }

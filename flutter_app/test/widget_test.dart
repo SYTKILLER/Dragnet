@@ -16,6 +16,10 @@ void main() {
         'stats' => null,
         'ruleInfo' => null,
         'rulesDir' => '/data/user/0/com.march.dragnet_app/files/rules',
+        // 方向1 新增三方法：日志空环 / 无启动失败 / 重载成功
+        'logs' => '{"cursor":0,"events":[]}',
+        'lastError' => null,
+        'reloadRules' => 0,
         _ => null,
       };
     });

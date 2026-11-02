@@ -37,4 +37,14 @@ object DragnetNative {
 
     /** 域名匹配自检 JSON {action,rule,list}；引擎空载/域名为空返回 null。 */
     external fun nativeMatch(domain: String): String?
+
+    /**
+     * 内核事件环形日志（方向1）增量拉取：返回 id>cursor 的最旧 500 条（升序）
+     * 与当前最大 id，JSON {"cursor":N,"events":[{"id","ts","kind","action",
+     * "domain","rule","list","dest","process"}]}；空输出 events 为 []。
+     */
+    external fun nativeLogs(cursor: Long): String?
+
+    /** 最近一次 startVpn 失败原因（"rc=-17 <底层错误文本>"）；从未失败返回 null。 */
+    external fun nativeLastError(): String?
 }

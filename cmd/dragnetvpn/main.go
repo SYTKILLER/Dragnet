@@ -14,6 +14,11 @@
 //   - 崩溃边界：每个导出函数 recover 全部 panic，转为负数错误码。
 //
 // Kotlin 侧对应 com.dragnet.app.DragnetNative（符号名按 JNI 约定固定）。
+//
+// JNI 导出（9 个）：nativeSetService / nativeStartVpn / nativeStopVpn /
+// nativeLoadRules / nativeStats / nativeRuleInfo / nativeMatch /
+// nativeLogs（事件环形日志增量拉取）/ nativeLastError（最近一次启动失败原因）。
+// 另有 C ABI 3 个：DragnetLoadRules / DragnetMatchDetail / DragnetFreeString。
 package main
 
 /*
@@ -66,6 +71,7 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -96,6 +102,12 @@ var (
 	runDev   tun.Tun
 	runStart time.Time
 	runStats *tunstack.Handler
+
+	// 最近一次 startVpn 失败的底层错误文本（nativeLastError 导出；对齐
+	// cmd/dragnetohos 的 lastError/setStartErr 样板。空串=从未失败，导出 null；
+	// 成功启动时清空）。
+	lastErrMu    sync.Mutex
+	lastStartErr string
 )
 
 // ---- JNI 入口（对应 Kotlin DragnetNative）----
@@ -219,6 +231,62 @@ func Java_com_dragnet_app_DragnetNative_nativeMatch(env *C.JNIEnv, thiz C.jobjec
 	return C.dg_new_jstr(env, cs2)
 }
 
+// nativeLogs 增量拉取内核事件环形日志（方向1）：返回 id>cursor 的最旧 500 条
+// （升序）与当前最大 id。JSON 手工拼装（与 nativeStats 同风格，字符串经
+// jsonEscape）：
+//
+//	{"cursor":<当前最大id>,"events":[{"id":N,"ts":N,"kind":"dns","action":"block",
+//	  "domain":"","rule":"","list":"","dest":"","process":""}]}
+//
+// 空输出为 "events":[]；壳层以返回的 cursor 续拉、不丢事件。
+//
+//export Java_com_dragnet_app_DragnetNative_nativeLogs
+func Java_com_dragnet_app_DragnetNative_nativeLogs(env *C.JNIEnv, thiz C.jobject, cursor C.jlong) (rs C.jstring) {
+	defer recoverStats(&rs)
+	cur := uint64(cursor)
+	if cursor < 0 {
+		cur = 0
+	}
+	events, maxID := logsAfter(cur, 500)
+	var b strings.Builder
+	b.WriteString(`{"cursor":`)
+	b.WriteString(fmt.Sprint(maxID))
+	b.WriteString(`,"events":[`)
+	for i, ev := range events {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b,
+			`{"id":%d,"ts":%d,"kind":"%s","action":"%s","domain":"%s","rule":"%s","list":"%s","dest":"%s","process":"%s"}`,
+			ev.ID, ev.Ts,
+			jsonEscape(ev.Kind), jsonEscape(ev.Action), jsonEscape(ev.Domain),
+			jsonEscape(ev.Rule), jsonEscape(ev.List), jsonEscape(ev.Dest),
+			jsonEscape(ev.Process))
+	}
+	b.WriteString(`]}`)
+	cs := C.CString(b.String())
+	defer C.free(unsafe.Pointer(cs))
+	return C.dg_new_jstr(env, cs)
+}
+
+// nativeLastError 返回最近一次 startVpn 失败的底层错误文本（"rc=-17 <错误>"）；
+// 从未失败/已成功启动返回 null。错误码语义不变，只是把原因带出崩溃边界。
+//
+//export Java_com_dragnet_app_DragnetNative_nativeLastError
+func Java_com_dragnet_app_DragnetNative_nativeLastError(env *C.JNIEnv, thiz C.jobject) (rs C.jstring) {
+	defer recoverStats(&rs)
+	lastErrMu.Lock()
+	s := lastStartErr
+	lastErrMu.Unlock()
+	if s == "" {
+		var jnil C.jstring
+		return jnil
+	}
+	cs := C.CString(s)
+	defer C.free(unsafe.Pointer(cs))
+	return C.dg_new_jstr(env, cs)
+}
+
 // jsonEscape 极简 JSON 字符串转义（规则原文含引号/反斜杠/控制符时保真）。
 func jsonEscape(s string) string {
 	buf := make([]byte, 0, len(s))
@@ -292,17 +360,42 @@ func DragnetFreeString(p *C.char) {
 
 // ---- 内核起停 ----
 
-func startVPN(fd int, dnsUp string, mtu int) int {
+// setStartErr 记录最近一次 startVpn 失败原因（nativeLastError 导出）。
+func setStartErr(rc int, why string) {
+	lastErrMu.Lock()
+	lastStartErr = fmt.Sprintf("rc=%d %s", rc, why)
+	lastErrMu.Unlock()
+}
+
+// clearStartErr 成功启动后清空失败记录（此后 nativeLastError 返回 null）。
+func clearStartErr() {
+	lastErrMu.Lock()
+	lastStartErr = ""
+	lastErrMu.Unlock()
+}
+
+func startVPN(fd int, dnsUp string, mtu int) (rc int) {
+	// 与 cmd/dragnetohos 的 startVPN 同型：在内核侧接住 panic 记录 -99 原因
+	// （JNI 层 recoverJNI 仍兜底，但原因文本只有这里拿得到）。
+	defer func() {
+		if r := recover(); r != nil {
+			rc = -99
+			setStartErr(-99, fmt.Sprint(r))
+		}
+	}()
 	runMu.Lock()
 	defer runMu.Unlock()
 	if runStack != nil {
+		setStartErr(-10, "内核已在运行")
 		return -10 // 已在运行
 	}
 	up, err := netip.ParseAddrPort(dnsUp)
 	if err != nil {
+		setStartErr(-11, err.Error())
 		return -11
 	}
 	if fd <= 0 {
+		setStartErr(-12, fmt.Sprintf("fd=%d", fd))
 		return -12
 	}
 	if mtu <= 0 {
@@ -326,6 +419,20 @@ func startVPN(fd int, dnsUp string, mtu int) int {
 		DNSTimeout: dnsTimeout,
 		Bind:       protectBind,
 		Log:        alog,
+		// 事件环形日志（方向1）：OnEvent 已含全部 block 事件，不再接
+		// OnBlocked 以免重复。process 在 Android 恒空串（无进程识别）。
+		OnEvent: func(ev tunstack.Event) {
+			logAdd(logEvent{
+				Ts:      ev.Time.UnixMilli(),
+				Kind:    ev.Kind,
+				Action:  ev.Action,
+				Domain:  ev.Domain,
+				Rule:    ev.Rule,
+				List:    ev.List,
+				Dest:    ev.Dest.String(),
+				Process: ev.Process,
+			})
+		},
 	})
 
 	prefix := netip.MustParsePrefix(tunAddr)
@@ -338,6 +445,7 @@ func startVPN(fd int, dnsUp string, mtu int) int {
 	}
 	dev, err := tun.New(options)
 	if err != nil {
+		setStartErr(-14, err.Error())
 		return -14
 	}
 	stack, err := tun.NewStack("gvisor", tun.StackOptions{
@@ -349,16 +457,20 @@ func startVPN(fd int, dnsUp string, mtu int) int {
 		UDPTimeout: 5 * time.Minute,
 	})
 	if err != nil {
+		setStartErr(-15, err.Error())
 		return -15
 	}
 	if err := dev.Start(); err != nil {
+		setStartErr(-16, err.Error())
 		return -16
 	}
 	if err := stack.Start(); err != nil {
+		setStartErr(-17, err.Error())
 		return -17
 	}
 	runDev, runStack, runStats = dev, stack, h
 	runStart = time.Now()
+	clearStartErr()
 	alog.Info("罗网内核上线: fd=", fd, " mtu=", mtu, " dns=", dnsUp)
 	return 0
 }

@@ -27,6 +27,8 @@ void main() {
     unawaited(controller.refreshStats());
     unawaited(controller.refreshRuleInfo());
     controller.startPolling();
+    // 方向1：种子规则写入 + 订阅 6h / App 24h 自动检查（内部全程 try/catch 静默）
+    unawaited(controller.startBackgroundServices());
     runApp(const DragnetApp());
   }, (error, stack) {
     debugPrint('未捕获异常: $error\n$stack');

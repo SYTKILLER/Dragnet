@@ -6,6 +6,11 @@
 # 注意：用 NDK 的 target-clang.cmd 包装器（自带 --target/sysroot/API 级别）；
 #       直接用裸 clang.exe 在 Windows 下 sysroot/三元组处理有坑。Git Bash 下运行。
 # 验证导出：llvm-nm -D 产物 | grep -E "Dragnet|Java_"
+# 预期 JNI 导出 9 个（Java_com_dragnet_app_DragnetNative_）：
+#   nativeSetService nativeStartVpn nativeStopVpn nativeLoadRules
+#   nativeStats nativeRuleInfo nativeMatch nativeLogs nativeLastError
+# C ABI 3 个：DragnetLoadRules DragnetMatchDetail DragnetFreeString
+# 注：壳层 "reloadRules" 复用既有 nativeLoadRules，无独立 JNI 符号。
 
 set -euo pipefail
 

@@ -2,7 +2,7 @@ name: dragnet_app
 description: "罗网 Dragnet Flutter Android GUI（液态玻璃设计语言）"
 publish_to: 'none'
 
-version: 1.0.0+1
+version: 1.1.0+2
 
 environment:
   sdk: ^3.13.7
@@ -11,6 +11,10 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
+
+  # 订阅源条件 GET / GitHub release 检查（方向1 应用侧四功能）。
+  # 唯一新增依赖；不引 path_provider（rulesDir 由 'dragnet/native' 通道提供）。
+  http: ^1.2.0
 
   # 真折射透镜（浮出面板钉死这一档）。钉死 4.1.1 —— 4.3.1+ 在部分平台首帧白屏
   # （复现指南 §1.1）；5.x 重构了 API，未按指南标定，不追新。
@@ -30,3 +34,9 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  # M4-R1 规则可见性：种子=starter.txt、保护清单=protected-allow.txt 随包分发
+  # （外部可见文件，与鸿蒙 rawfile 同型），首启写入 rulesDir，不内嵌进二进制。
+  assets:
+    - assets/rules/starter.txt
+    - assets/rules/protected-allow.txt

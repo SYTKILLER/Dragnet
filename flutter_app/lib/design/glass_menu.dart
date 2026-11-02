@@ -277,7 +277,12 @@ class _GlassMenuRow extends StatelessWidget {
     final row = GlassPressable(
       onTap: o.onTap == null
           ? null
-          : () => Navigator.of(context, rootNavigator: true).pop(),
+          : () {
+              // 先收菜单再执行动作（首个真实调用点修正：原实现只 pop，
+              // option.onTap 永远不会被调）
+              Navigator.of(context, rootNavigator: true).pop();
+              o.onTap!();
+            },
       builder: (_, pressed) {
         final bg = pressed
             ? cs.onSurface.withValues(alpha: 0.10)

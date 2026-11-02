@@ -4,6 +4,9 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import '../services/app_update.dart';
+import '../services/rule_source.dart';
+
 /// 内核运行统计（cmd/dragnetvpn nativeStats JSON 字段）。
 class KernelStats {
   const KernelStats({
@@ -100,6 +103,57 @@ class MatchResult {
   }
 }
 
+/// 转发日志单条（nativeLogs JSON events 元素；ts 为毫秒）。
+/// 语义：block=命中规则阻断；allow=命中白名单例外；forward=DNS 正常转发；
+/// relay=TCP/UDP 正常中继。
+class LogEvent {
+  const LogEvent({
+    required this.id,
+    required this.ts,
+    required this.kind,
+    required this.action,
+    required this.domain,
+    required this.rule,
+    required this.list,
+    required this.dest,
+    required this.process,
+  });
+
+  final int id;
+  final int ts;
+  final String kind; // dns | tcp | udp
+  final String action; // block | allow | forward | relay
+  final String domain;
+  final String rule;
+  final String list;
+  final String dest;
+  final String process;
+
+  static LogEvent? fromJson(Map<String, dynamic> m) {
+    final id = (m['id'] as num?)?.toInt();
+    if (id == null) return null;
+    return LogEvent(
+      id: id,
+      ts: (m['ts'] as num?)?.toInt() ?? 0,
+      kind: (m['kind'] as String?) ?? '',
+      action: (m['action'] as String?) ?? '',
+      domain: (m['domain'] as String?) ?? '',
+      rule: (m['rule'] as String?) ?? '',
+      list: (m['list'] as String?) ?? '',
+      dest: (m['dest'] as String?) ?? '',
+      process: (m['process'] as String?) ?? '',
+    );
+  }
+}
+
+/// 一次 logs 拉取的返回（cursor=内核侧最大 id；events 升序）。
+class LogsChunk {
+  const LogsChunk({required this.cursor, required this.events});
+
+  final int cursor;
+  final List<LogEvent> events;
+}
+
 /// 原生桥 + 全局状态。内核运行在同进程 VpnService（与 PoC 壳一致），
 /// "运行中"判据 = nativeStats() 非 null（对齐鸿蒙端的轮询口径，2s 周期）。
 class AppController extends ChangeNotifier {
@@ -116,7 +170,13 @@ class AppController extends ChangeNotifier {
   RuleInfo? ruleInfo;
   String rulesDir = '';
 
+  /// lastStartRc≠0 时的内核 startVpn 失败原因（lastError 通道）。
+  int lastStartRc = 0;
+  String? kernelLastError;
+
   Timer? _pollTimer;
+  Timer? _ruleAutoTimer;
+  bool _bgStarted = false;
 
   Future<T?> _invoke<T>(String method, [Map<String, Object?>? args]) async {
     try {
@@ -159,6 +219,7 @@ class AppController extends ChangeNotifier {
       }
       starting = false;
       startError = '内核未在 6s 内上线（logcat -s Dragnet 查看详情）';
+      await refreshStartFailure(); // lastStartRc≠0 时透出 lastError 具体原因
       notifyListeners();
       return false;
     } on PlatformException {
@@ -193,6 +254,10 @@ class AppController extends ChangeNotifier {
       final wasRunning = running;
       running = s != null;
       if (running) startError = null;
+      if (!running && wasRunning) {
+        // 运行中→停止（内核崩溃/被杀）：查询 lastStartRc/lastError 透出原因
+        unawaited(refreshStartFailure());
+      }
       if (!quiet || wasRunning != running) notifyListeners();
     } on PlatformException {
       if (!quiet) notifyListeners();
@@ -218,6 +283,155 @@ class AppController extends ChangeNotifier {
     }
   }
 
+  /// 热切换重载规则（'reloadRules'，复用 nativeLoadRules 原子热切换，
+  /// 运行中调用也生效）。返回 0=成功，负数=失败。
+  Future<int> reloadRules() async {
+    try {
+      return await _invoke<int>('reloadRules', {'dir': rulesDir}) ?? -1;
+    } on PlatformException {
+      return -1;
+    }
+  }
+
+  /// 增量拉取转发日志（'logs'）。返回 null=通道异常（调用方忽略本次）；
+  /// 旧 .so 无符号时原生侧返回 null → 当空处理（cursor 原样带回）。
+  Future<LogsChunk?> fetchLogs(int cursor) async {
+    try {
+      final raw = await _invoke<String>('logs', {'cursor': cursor});
+      if (raw == null) return LogsChunk(cursor: cursor, events: const []);
+      final m = jsonDecode(raw) as Map<String, dynamic>;
+      final c = (m['cursor'] as num?)?.toInt() ?? cursor;
+      final events = <LogEvent>[];
+      for (final e in (m['events'] as List?) ?? const []) {
+        if (e is Map<String, dynamic>) {
+          final ev = LogEvent.fromJson(e);
+          if (ev != null) events.add(ev);
+        }
+      }
+      return LogsChunk(cursor: c, events: events);
+    } on PlatformException {
+      return null;
+    }
+  }
+
+  /// 内核未运行时的失败原因透出：lastStartRc≠0 → 取 lastError 具体文本。
+  Future<void> refreshStartFailure() async {
+    try {
+      final rc = await _invoke<int>('lastStartRc');
+      lastStartRc = rc ?? 0;
+      kernelLastError = null;
+      if (lastStartRc != 0) {
+        try {
+          kernelLastError = await _invoke<String>('lastError');
+        } on PlatformException {
+          kernelLastError = null;
+        }
+      }
+      notifyListeners();
+    } on PlatformException {
+      // 静默：桥不可用时无信息可透出
+    }
+  }
+
+  /// 一轮全部订阅更新（手动/自动共用）：顺序逐源拉取 → 回写 lastRulesCheck
+  /// → 有更新则 reloadRules 热切换并刷新 ruleInfo。
+  Future<UpdateAllSummary> updateAllSources({
+    void Function(int done, int total, String name)? onProgress,
+  }) async {
+    final svc = SubscriptionService.instance;
+    final summary = await svc.updateAll(onProgress: onProgress);
+    await svc.saveAppConfig(lastRulesCheck: DateTime.now());
+    if (summary.anyUpdated) {
+      final rc = await reloadRules();
+      await refreshRuleInfo();
+      if (rc != 0) debugPrint('规则热切换失败 rc=$rc（沿用旧引擎）');
+    }
+    return summary;
+  }
+
+  /// 用户规则写文件 → reloadRules → 返回 rc（UI snackbar 反馈用）。
+  Future<int> applyUserRules(List<String> lines) async {
+    final svc = SubscriptionService.instance;
+    try {
+      await svc.writeUserRuleLines(lines);
+    } catch (e) {
+      debugPrint('用户规则写盘失败: $e');
+      return -1;
+    }
+    return reloadRules();
+  }
+
+  /// main() 启动钩子：种子规则写入 + 订阅/App 自动检查调度。
+  /// ⛔ 全程静默失败（try/catch + debugPrint），不做任何可能阻塞 init 的事。
+  Future<void> startBackgroundServices() async {
+    if (_bgStarted) return;
+    _bgStarted = true;
+    await refreshRuleInfo();
+    final svc = SubscriptionService.instance;
+    if (rulesDir.isEmpty) return;
+    try {
+      await svc.ensureLoaded(rulesDir);
+    } catch (e) {
+      debugPrint('订阅服务初始化失败: $e');
+      return;
+    }
+    try {
+      await svc.seedRulesIfEmpty(); // M4-R1：首启无 *.txt 时落盘种子
+    } catch (e) {
+      debugPrint('种子规则写入失败: $e');
+    }
+    if (!running) unawaited(refreshStartFailure());
+    unawaited(_autoRuleCheckOnce());
+    _ruleAutoTimer?.cancel();
+    _ruleAutoTimer = Timer.periodic(const Duration(hours: 6), (_) {
+      unawaited(_autoRuleCheck());
+    });
+    unawaited(_autoAppUpdateCheck());
+  }
+
+  Future<void> _autoRuleCheckOnce() async {
+    try {
+      final cfg = SubscriptionService.instance.appConfig;
+      if (!cfg.autoUpdateRules) return;
+      final last = DateTime.tryParse(cfg.lastRulesCheck);
+      if (last != null &&
+          DateTime.now().difference(last) <= const Duration(hours: 6)) {
+        return;
+      }
+      await updateAllSources(); // 后台静默，完成后已刷新 ruleInfo
+    } catch (e) {
+      debugPrint('自动规则检查失败: $e');
+    }
+  }
+
+  Future<void> _autoRuleCheck() async {
+    try {
+      if (!SubscriptionService.instance.appConfig.autoUpdateRules) return;
+      await updateAllSources();
+    } catch (e) {
+      debugPrint('周期规则检查失败: $e');
+    }
+  }
+
+  Future<void> _autoAppUpdateCheck() async {
+    try {
+      final cfg = SubscriptionService.instance.appConfig;
+      final last = DateTime.tryParse(cfg.lastAppUpdateCheck);
+      if (last != null &&
+          DateTime.now().difference(last) <= const Duration(hours: 24)) {
+        return;
+      }
+      final r = await checkAppUpdate();
+      await SubscriptionService.instance
+          .saveAppConfig(lastAppUpdateCheck: DateTime.now());
+      if (r.isNewVersion && r.release != null) {
+        AppUpdateNotifier.instance.markAvailable(r.release!); // 设置页角标提示一次
+      }
+    } catch (e) {
+      debugPrint('App 自更新检查失败: $e');
+    }
+  }
+
   /// 2s 周期轮询：运行中刷新统计；stats 变 null（进程被杀）即判停。
   void startPolling() {
     _pollTimer?.cancel();
@@ -229,6 +443,7 @@ class AppController extends ChangeNotifier {
   @override
   void dispose() {
     _pollTimer?.cancel();
+    _ruleAutoTimer?.cancel();
     super.dispose();
   }
 }

@@ -53,10 +53,26 @@ type Config struct {
 	// ProcessLookup 进程识别注入，可为 nil。
 	ProcessLookup func(network uint8, source netip.AddrPort) string
 	// OnBlocked 在每次阻断时回调（回溯 UI/IPC 数据源）；必须快速返回，
-	// 绝不阻塞转发路径。
+	// 绝不阻塞转发路径。保持兼容：Windows 壳（wincore）在用，签名不变。
 	OnBlocked func(kind, domain, rule, list, process string, dest netip.AddrPort)
+	// OnEvent 是全事件超集钩子（block/allow/forward/relay 都触发；OnBlocked
+	// 只报 block），两者在 block 点都会触发。必须快速返回、绝不阻塞转发路径；
+	// 可为 nil。
+	OnEvent func(Event)
 	// Log 使用 sing logger 接口（与 sing-tun 同一适配器复用）。
 	Log Logger
+}
+
+// Event 是一次 DNS/TCP/UDP 判定或转发/中继事件的快照，供壳层落环形日志。
+type Event struct {
+	Time    time.Time
+	Kind    string // "dns"|"tcp"|"udp"
+	Action  string // "block"|"allow"|"forward"|"relay"
+	Domain  string
+	Rule    string
+	List    string
+	Process string
+	Dest    netip.AddrPort
 }
 
 // Logger 是本包日志依赖的最小接口（sing logger.Logger 的子集）。
@@ -121,10 +137,28 @@ func (h *Handler) JudgeFlow(network uint8, source, destination netip.AddrPort, f
 	}
 	domain := h.cfg.Cache.Domain(destination.Addr(), time.Now())
 	if domain != "" {
-		res := h.match(domain, destination, h.processName(network, source))
+		proc := h.processName(network, source)
+		res := h.match(domain, destination, proc)
 		if res.Action == verdict.ActionBlock {
 			h.cfg.Log.Info("阻断 ", networkName(network), " ", source, " -> ", destination,
 				" domain=", domain, " ", ruleInfo(res))
+			// 缓存证据直接 Reject 的流不会进入 NewConnectionEx/NewPacketConnectionEx，
+			// 统计与事件必须在此补齐（此前该路径静默：不计 stats、不触发回调）。
+			kind := "tcp"
+			if network == protoUDP {
+				kind = "udp"
+				h.stats.udpBlocked.Add(1)
+			} else {
+				h.stats.tcpBlocked.Add(1)
+			}
+			if h.cfg.OnBlocked != nil {
+				h.cfg.OnBlocked(kind, domain, res.RuleText, res.List, proc, destination)
+			}
+			if h.cfg.OnEvent != nil {
+				h.cfg.OnEvent(Event{Time: time.Now(), Kind: kind, Action: "block",
+					Domain: domain, Rule: res.RuleText, List: res.List, Process: proc,
+					Dest: destination})
+			}
 			return tun.FlowVerdict{Action: tun.ActionReject}
 		}
 	}
@@ -176,6 +210,10 @@ func (h *Handler) handleDNS(payload []byte, source, destination M.Socksaddr, wri
 		if h.cfg.OnBlocked != nil {
 			h.cfg.OnBlocked("dns", qname, res.RuleText, res.List, "", destination.AddrPort())
 		}
+		if h.cfg.OnEvent != nil {
+			h.cfg.OnEvent(Event{Time: time.Now(), Kind: "dns", Action: "block",
+				Domain: qname, Rule: res.RuleText, List: res.List, Dest: destination.AddrPort()})
+		}
 		h.cfg.Log.Info("阻断 DNS ", qname, " ", ruleInfo(res))
 		resp := dnsmessage.Message{
 			ID:                 query.ID,
@@ -192,6 +230,16 @@ func (h *Handler) handleDNS(payload []byte, source, destination M.Socksaddr, wri
 		return
 	}
 	h.stats.dnsForwarded.Add(1)
+	if h.cfg.OnEvent != nil {
+		// @@ 例外命中是显式放行判定，其余（含 NoMatch 默认放行）按转发上报；
+		// Rule/List 仅在命中判定时携带。
+		action, rule, list := "forward", "", ""
+		if res.Action == verdict.ActionAllow {
+			action, rule, list = "allow", res.RuleText, res.List
+		}
+		h.cfg.OnEvent(Event{Time: time.Now(), Kind: "dns", Action: action,
+			Domain: qname, Rule: rule, List: list, Dest: destination.AddrPort()})
+	}
 
 	respPayload, err := h.exchange(query.ID, payload)
 	if err != nil {
@@ -291,11 +339,21 @@ func (h *Handler) NewConnectionEx(ctx context.Context, conn net.Conn, source, de
 		if h.cfg.OnBlocked != nil {
 			h.cfg.OnBlocked("tcp", domain, res.RuleText, res.List, proc, destination.AddrPort())
 		}
+		if h.cfg.OnEvent != nil {
+			h.cfg.OnEvent(Event{Time: time.Now(), Kind: "tcp", Action: "block",
+				Domain: domain, Rule: res.RuleText, List: res.List, Process: proc,
+				Dest: destination.AddrPort()})
+		}
 		h.cfg.Log.Info("阻断 TCP ", source, " -> ", destination,
 			" domain=", orNone(domain), " process=", orNone(proc), " ", ruleInfo(res))
 		return
 	}
 	h.stats.tcpRelayed.Add(1)
+	if h.cfg.OnEvent != nil {
+		// 放行中继：domain 用嗅探到的 SNI/Host（可空）。
+		h.cfg.OnEvent(Event{Time: time.Now(), Kind: "tcp", Action: "relay",
+			Domain: domain, Process: proc, Dest: destination.AddrPort()})
+	}
 	if domain == "" {
 		h.cfg.Log.Info("中继 TCP ", source, " -> ", destination, " （无域名证据）")
 	} else {
@@ -330,16 +388,28 @@ func (h *Handler) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, 
 	if h.cfg.ProcessLookup != nil {
 		proc = h.cfg.ProcessLookup(protoUDP, source.AddrPort())
 	}
-	res := h.match(h.cfg.Cache.Domain(destination.AddrPort().Addr(), time.Now()), destination.AddrPort(), proc)
+	// 域名证据只能来自缓存（QUIC 等不嗅探）；提取为局部变量供判定、
+	// 事件与日志共用。此前 OnBlocked 把 domain 传了空串，回溯 UI 丢证据。
+	domain := h.cfg.Cache.Domain(destination.AddrPort().Addr(), time.Now())
+	res := h.match(domain, destination.AddrPort(), proc)
 	if res.Action == verdict.ActionBlock {
 		h.stats.udpBlocked.Add(1)
 		if h.cfg.OnBlocked != nil {
-			h.cfg.OnBlocked("udp", "", res.RuleText, res.List, proc, destination.AddrPort())
+			h.cfg.OnBlocked("udp", domain, res.RuleText, res.List, proc, destination.AddrPort())
+		}
+		if h.cfg.OnEvent != nil {
+			h.cfg.OnEvent(Event{Time: time.Now(), Kind: "udp", Action: "block",
+				Domain: domain, Rule: res.RuleText, List: res.List, Process: proc,
+				Dest: destination.AddrPort()})
 		}
 		h.cfg.Log.Info("阻断 UDP ", source, " -> ", destination, " ", ruleInfo(res))
 		return
 	}
 	h.stats.udpRelayed.Add(1)
+	if h.cfg.OnEvent != nil {
+		h.cfg.OnEvent(Event{Time: time.Now(), Kind: "udp", Action: "relay",
+			Domain: domain, Process: proc, Dest: destination.AddrPort()})
+	}
 
 	lc := net.ListenConfig{Control: h.cfg.Bind}
 	pc, err := lc.ListenPacket(ctx, "udp", "0.0.0.0:0")

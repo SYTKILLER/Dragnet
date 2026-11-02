@@ -1,0 +1,16 @@
+! 罗网防误杀保护清单（M4-R4）：@@…$important，加载后优先于订阅阻断。
+! 真实订阅（三类）均无 $important 阻断，故此清单的 important 例外不可被覆盖。
+! 原则：只收录基础服务域（支付/政务/预警/出行），宁可漏封不误封。用户可编辑。
+! 规则行尾不得接任何注释（TAB 或空格均会整行丢弃，2026-11-01 实测，
+! 见 PROGRESS 🔴 记录）；注释一律放独立 ! 行。
+! tenpay.com —— 微信支付
+@@||tenpay.com^$important
+! alipay.com / alipaydns.com —— 支付宝
+@@||alipay.com^$important
+@@||alipaydns.com^$important
+! 12379.cn —— 国家预警信息发布
+@@||12379.cn^$important
+! 12306.cn —— 铁路购票
+@@||12306.cn^$important
+! gov.cn —— 政府域名整体豁免
+@@||gov.cn^$important
