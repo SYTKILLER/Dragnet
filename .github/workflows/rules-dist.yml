@@ -1,0 +1,57 @@
+# 规则订阅发布（方向2）：重建 rules-dist 分支与滚动 Release。
+# 幂等：每次整树覆盖孤儿分支 rules-dist，Release 用滚动 tag `rules`（先删后建）。
+name: rules-dist
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cmd/ruleexport/**'
+      - 'internal/ruleconv/**'
+      - 'scripts/build-rules-dist.sh'
+      - 'rules/**'
+      - '.github/workflows/rules-dist.yml'
+  schedule:
+    - cron: '0 3 * * 1' # 每周一 03:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出
+        uses: actions/checkout@v4
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+
+      - name: 构建规则发布产物
+        run: bash scripts/build-rules-dist.sh
+
+      - name: 发布 rules-dist 分支（孤儿分支，整树覆盖）
+        run: bash scripts/publish-rules-dist.sh
+
+      - name: 发布滚动 Release（tag: rules）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # 幂等：旧 Release/远端 tag 先删（没有则忽略）
+          gh release delete rules --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          git push origin --delete refs/tags/rules || true
+          gh release create rules \
+            --repo "$GITHUB_REPOSITORY" \
+            --target rules-dist \
+            --title "Dragnet 规则订阅（滚动更新）" \
+            --notes "自动构建的规则订阅产物。条数与来源统计见附件 manifest.json；订阅用法见 rules-dist 分支根目录 README.md。" \
+            build/rules-dist/clash-classical.yaml \
+            build/rules-dist/clash-domain.yaml \
+            build/rules-dist/adguard.txt \
+            build/rules-dist/hosts \
+            build/rules-dist/domains.txt \
+            build/rules-dist/manifest.json
