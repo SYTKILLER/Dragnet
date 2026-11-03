@@ -1,0 +1,67 @@
+{
+  "generated_at": "2026-11-03T03:31:40Z",
+  "label": "2026-11-03",
+  "sources": [
+    {
+      "file": "build/rules-dist-src/anti-AD.txt",
+      "role": "block-source",
+      "lines": 101233,
+      "parsed": 101160,
+      "blocked": 101112,
+      "allowed": 48,
+      "dropped": 65
+    },
+    {
+      "file": "build/rules-dist-src/AWAvenue.txt",
+      "role": "block-source",
+      "lines": 987,
+      "parsed": 972,
+      "blocked": 972,
+      "allowed": 0,
+      "dropped": 4
+    },
+    {
+      "file": "build/rules-dist-src/hagezi-multi.txt",
+      "role": "block-source",
+      "lines": 176121,
+      "parsed": 176107,
+      "blocked": 176107,
+      "allowed": 0,
+      "dropped": 0
+    },
+    {
+      "file": "rules/starter.txt",
+      "role": "block-source",
+      "lines": 49,
+      "parsed": 38,
+      "blocked": 38,
+      "allowed": 0,
+      "dropped": 0
+    },
+    {
+      "file": "rules/protected-allow.txt",
+      "role": "allow-list",
+      "lines": 16,
+      "parsed": 6,
+      "blocked": 0,
+      "allowed": 6,
+      "dropped": 0
+    }
+  ],
+  "summary": {
+    "blocked": 203381,
+    "allowed": 54,
+    "dedup_removed": 58536,
+    "protected_excluded": 12,
+    "pruned_redundant": 16300
+  },
+  "outputs": {
+    "adguard.txt": 203381,
+    "allow/adguard.txt": 54,
+    "allow/clash-classical.yaml": 54,
+    "clash-classical.yaml": 203381,
+    "clash-domain.yaml": 203381,
+    "domains.txt": 203381,
+    "hosts": 203381
+  }
+}
