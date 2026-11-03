@@ -36,7 +36,7 @@ jobs:
       - name: 发布 rules-dist 分支（孤儿分支，整树覆盖）
         run: bash scripts/publish-rules-dist.sh
 
-      - name: 发布滚动 Release（tag: rules）
+      - name: "发布滚动 Release（tag: rules）"
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
