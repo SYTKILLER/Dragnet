@@ -150,6 +150,13 @@ go build -tags with_gvisor -o build/dragnet-tun.exe ./cmd/dragnet-tun
 
 ## 更新日志
 
+- 2026-11-03（测试机，M5-A/P0-A+ 模拟器走查开工；2026-11-02 夜断电中断一次，恢复后继续）：**本机从零搭 Flutter 构建链并完成门禁，APK 构建被断电打断待重跑**。
+  - **环境搭建（本机 C:\Users\sytki\tools\）**：Flutter 3.47.9 解压安装（flutter-io.cn 镜像，zip 校验后解压；`flutter config` 指 jdk=BellSoft Liberica 17、android-sdk=本机目录——Liberica 17 是完整 JDK 含 jlink，开发机"JBR 缺 jlink"坑本机不适用）；Gradle 9.3.1-all zip 走 7890 代理下载（直连也通但 zip 大文件不稳，代理+unzip -t 校验）后按 MD5 hash 目录种入 wrapper dists（hash a3a9c1a4364f10b24bbcd345dd24da3c，同开发机坑①）；Temurin JDK 21 下载备用未用。
+  - **NDK 坑（新，回写）**：flutter_app 模板（AGP 9.1.0）要求 **NDK 28.2.13676358**，本机原只有 r30。本机新版 cmdline-tools sdkmanager CLI 语法已变（无 `--install`/`--no_progress` 参数）且装 `ndk;28.2.13676358` 报 "Package ndk not found" 装不上 → 手动方案：走代理 curl 官方 zip 解压布局到 `android-sdk/ndk/28.2.13676358`；**注意 r28b 实为 28.1.13356709 不对版（已删），r28c 才是 28.2.13676358**（以 source.properties Pkg.Revision 核对）。
+  - **门禁**：内核 .so 双 ABI 重建（build-android.sh，9 JNI+3 C ABI=12 符号 llvm-nm 核对全齐）；go build/vet/test 全绿；`-verify` 5/5（build/rules 本机首次从仓库 rules/ 复制种子+保护清单+样本——build/ 不入库，新机器跑 verify 前需此步）；flutter analyze 零问题、test 24/24。AVD dragnet headless boot 通过。
+  - **断电中断**：`flutter build apk --debug`（NDK 28.2 就位后首次构建）进行中遇设备断电，APK 未产出、模拟器进程死亡；恢复后重跑构建→安装→六项走查（清单见 M5-A 行与 2026-11-02 开发机条目⑥）。**残留坑**：断电/强关后 Emulator.exe 挂尸致 `adb devices` 显示 offline，下次启动前 taskkill 清理。
+  - 仓库卫生：.gitignore 补 `.zcode/`（本地智能体会话目录）；pubspec.lock 的 pub.dev/pub.flutter-io.cn URL 漂移属镜像噪音（版本零变化）不入库。
+
 - 2026-11-02（开发机，M5 双线交付：App 功能扩展一期 + rules-dist 规则资产发布，三并行子代理开发+集成验证全绿）：**用户指令两方向：①完善 app 功能（添加规则/git 规则自动更新/自更新/转发日志+一键拦截）②推出其他 app 可用规则（如 Clash）作为最小成果**。
   - **内核（cmd/dragnetvpn + tunstack）**：tunstack 新增 `Event`+`Config.OnEvent` 全事件钩子（block/allow/forward/relay；OnBlocked 签名不变 Windows 零影响）；dragnetvpn 新增 1024 条事件环形缓冲（ring.go 无构建标签+stub_main.go 使宿主可编译测试，-race 容器实测过）+ JNI 导出 `nativeLogs(cursor)`/`nativeLastError()`（startVPN 各失败分支记录 "rc=N <错误文本>"，成功清空，对齐鸿蒙 lastError）；`reloadRules` 复用既有 nativeLoadRules（MainActivity 新分支透出，全部 JNI 调用 try/catch UnsatisfiedLinkError 防旧 .so 崩壳）。**连带修复**：JudgeFlow ipcache 命中 Reject 路径此前不计 stats/不触发回调（补 tcpBlocked/udpBlocked 计数+两回调，Windows 回溯同受益）；UDP 阻断事件 domain 空串改为缓存域名。双 ABI .so 重建（JNI 9 符号+C ABI 3 符号 llvm-nm 核对）。
   - **Flutter（flutter_app，1.1.0+2）**：规则页重构（订阅源卡：增删启停/单源更新/全部更新带进度；用户规则卡：bottom sheet 管理 zzz-user-rules.txt；重新加载卡）；新转发日志页（增量轮询/过滤/清屏/点行加拦截或放行/复制域名）；设置页更新卡（检查更新弹窗+复制链接、当前版本、规则自动更新开关、立即检查规则更新）；仪表盘启动失败红字透出+日志入口。订阅引擎 lib/services/rule_source.dart（23 单测）、app_update.dart；种子随 assets 首启分发；**新增依赖仅 http**。glass_menu.dart 修复 onTap 从不执行的 bug。analyze 零问题、test 24/24。

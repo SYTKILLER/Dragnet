@@ -98,3 +98,6 @@ go.work.sum
 # Flutter 安卓端（flutter_app/）：构建产物已被上方 build//.gradle/local.properties/
 # *.apk 覆盖；启动图标是编译必需资源，从 *.png 全局忽略中豁免
 !flutter_app/android/app/src/main/res/mipmap-*/ic_launcher.png
+
+# --- 本地智能体会话目录（ZCode）---
+.zcode/
