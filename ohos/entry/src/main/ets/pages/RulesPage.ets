@@ -1,5 +1,6 @@
-// 规则页（v2 重制）：不再展示规则文件列表，改为展示**具体规则内容**（用户规则，
-// 哪些域名被拦截/放行）+ 引擎规模卡 + 重新加载/匹配自检入口（上移至规则列表上方）。
+// 规则页（v2 重制）：不再展示规则文件列表，改为展示**具体规则内容**（用户规则 +
+// 内置种子规则，哪些域名被拦截/放行）+ 引擎规模卡 + 重新加载/匹配自检入口（上移至
+// 规则列表上方）。
 //
 // 用户规则（filesDir/rules/zzz-user-rules.txt，格式/文件名与 Android 壳 M5-A 一致）：
 //   - ListItem 展示单条规则（域名 + 拦截/放行标签 + 停用标记），右侧 Toggle 启停；
@@ -9,13 +10,22 @@
 //   - 每次变更即时写文件 + 重载本页引擎实例（自检即时生效）；
 //     VPN 扩展进程的引擎在下次 startVpn 时加载新规则（页面有提示文案）。
 //
+// 内置规则（filesDir/rules/starter.txt + protected-allow.txt，随包种子，M4-R1）：
+//   - 独立卡片置于用户规则卡上方，**默认折叠**：仅头部行（标题 + 总数 + 拦截/放行
+//     摘要 + chevron），点击头部经 UIContext.animateTo 原生隐式动画展开/收起
+//     （展开时卡片 layoutWeight 1:0 切换，与用户规则卡各半，内部 List 自滚动）；
+//   - 仅允许启停（行尾 Toggle，同 '! ' 注释前缀机制写回原文件），无增删改：
+//     无「+」钮、无滑动操作区；
+//   - 文件缺失/无可解析规则 → 空态提示（种子可能被用户移除）。
+//
 // 规范合规（docs/hmos-dev/30-规范）：
 //   - List 直属子节点只能是 ListItem/ListItemGroup；ListItem 单子节点（内部包 Row）；
 //   - ForEach keyGenerator 编入内容状态（域名+类型+启用态，启停后同域行重建渲染）；
 //   - 图标一律 SymbolGlyph（禁 emoji / 图片图标）；颜色一律 $r('app.color.*')；
 //   - AlertDialog 用 getUIContext().showAlertDialog（API 18 后全局 show 已废弃）；
 //   - bindSheet isShow 走 $$ 双向绑定（下拉关闭自动回写 @State）；
-//   - Toggle onChange 与程序回显幂等（同值跳过，防重放翻转）。
+//   - Toggle onChange 与程序回显幂等（同值跳过，防重放翻转）；
+//   - 动画用 getUIContext().animateTo（原生隐式动画 + @State 驱动）。
 
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -24,9 +34,12 @@ import {
   loadRulesDir, readRuleInfo, loadRulesErrorText, formatBytes, RuleInfo
 } from '../common/DragnetService';
 import {
-  UserRuleKind, UserRuleEntry, listUserRules,
+  RuleEntryBase, UserRuleKind, UserRuleEntry, listUserRules,
   addUserRule, updateUserRule, deleteUserRule, toggleUserRule
 } from '../common/UserRulesService';
+import {
+  BuiltInRuleEntry, listBuiltInRules, toggleBuiltInRule
+} from '../common/BuiltInRulesService';
 
 const DOMAIN = 0xD22E0;
 
@@ -34,6 +47,9 @@ const DOMAIN = 0xD22E0;
 export struct RulesPage {
   @State info: RuleInfo | null = null;
   @State entries: UserRuleEntry[] = [];
+  @State builtInEntries: BuiltInRuleEntry[] = [];
+  @State builtInExpanded: boolean = false;
+  @State builtInSummary: string = '';
   @State statusMsg: string = '';
   @State statusIsError: boolean = false;
   // bindSheet 编辑态：editingLine=-1 新建；>=0 为 zzz-user-rules.txt 的行号
@@ -47,13 +63,13 @@ export struct RulesPage {
     // 进页静默加载：引擎装载 + 条目/规模刷新；失败才提示（成功不喧哗）
     const rc: number = loadRulesDir(this.filesDir());
     this.info = readRuleInfo();
-    this.entries = listUserRules(this.filesDir());
+    this.reloadEntries();
     if (rc !== 0) {
       this.statusIsError = true;
       this.statusMsg = loadRulesErrorText(rc);
     }
-    hilog.info(DOMAIN, 'Dragnet', '[UI] RulesPage aboutToAppear loadRules rc=%{public}d, userRules=%{public}d',
-      rc, this.entries.length);
+    hilog.info(DOMAIN, 'Dragnet', '[UI] RulesPage aboutToAppear loadRules rc=%{public}d, userRules=%{public}d, builtIn=%{public}d',
+      rc, this.entries.length, this.builtInEntries.length);
   }
 
   private filesDir(): string {
@@ -65,20 +81,44 @@ export struct RulesPage {
   private refreshAll(opText: string): void {
     const rc: number = loadRulesDir(this.filesDir());
     this.info = readRuleInfo();
-    this.entries = listUserRules(this.filesDir());
+    this.reloadEntries();
     if (opText !== '') {
       this.statusIsError = rc !== 0;
       this.statusMsg = rc === 0
         ? opText + '，已重载引擎'
         : opText + '；引擎重载失败：' + loadRulesErrorText(rc);
     }
-    hilog.info(DOMAIN, 'Dragnet', '[UI] rules %{public}s: loadRules rc=%{public}d, userRules=%{public}d',
-      opText === '' ? 'reload' : opText, rc, this.entries.length);
+    hilog.info(DOMAIN, 'Dragnet', '[UI] rules %{public}s: loadRules rc=%{public}d, userRules=%{public}d, builtIn=%{public}d',
+      opText === '' ? 'reload' : opText, rc, this.entries.length, this.builtInEntries.length);
   }
 
   /** 仅刷新条目列表（不动引擎；用于失败后回滚 Toggle 视觉）。 */
   private refreshEntries(): void {
+    this.reloadEntries();
+  }
+
+  /** 现读用户规则 + 内置规则两组条目，并重算内置卡头部摘要。 */
+  private reloadEntries(): void {
     this.entries = listUserRules(this.filesDir());
+    this.builtInEntries = listBuiltInRules(this.filesDir());
+    let block = 0;
+    let allow = 0;
+    let disabled = 0;
+    for (const e of this.builtInEntries) {
+      if (e.kind === UserRuleKind.ALLOW) {
+        allow++;
+      } else {
+        block++;
+      }
+      if (!e.enabled) {
+        disabled++;
+      }
+    }
+    let summary = '拦截 ' + block + ' · 放行 ' + allow;
+    if (disabled > 0) {
+      summary += ' · 停用 ' + disabled;
+    }
+    this.builtInSummary = summary;
   }
 
   private reload(): void {
@@ -152,6 +192,28 @@ export struct RulesPage {
       return;
     }
     this.refreshAll(on ? '已启用规则' : '已停用规则');
+  }
+
+  /** 内置规则启停：无增删改，仅 '! ' 前缀切换（写回 starter/protected 文件本身）。 */
+  private onBuiltInToggle(entry: BuiltInRuleEntry, on: boolean): void {
+    if (on === entry.enabled) {
+      return; // 程序回显或重复事件：同值跳过，防重放翻转
+    }
+    const res = toggleBuiltInRule(this.filesDir(), entry.file, entry.lineIndex, on);
+    if (res.code !== 0) {
+      this.statusIsError = true;
+      this.statusMsg = res.message;
+      this.refreshEntries(); // 失败：条目重读，Toggle 视觉回滚
+      return;
+    }
+    this.refreshAll(on ? '已启用内置规则' : '已停用内置规则');
+  }
+
+  /** 展开/收起内置规则卡：原生隐式动画驱动 layoutWeight 1:0 切换。 */
+  private toggleBuiltInExpand(): void {
+    this.getUIContext().animateTo({ duration: 250, curve: Curve.Friction }, () => {
+      this.builtInExpanded = !this.builtInExpanded;
+    });
   }
 
   /** 删除二次确认（AlertDialog）；确认后才真正删除。 */
@@ -230,9 +292,12 @@ export struct RulesPage {
     .padding({ left: 4, right: 12 })
   }
 
-  /** 单条用户规则行：类型图标 + 域名/标签列 + 启停 Toggle。 */
+  /**
+   * 单条规则行（用户/内置共用，仅内容渲染）：类型图标 + 域名/标签列 + 启停 Toggle。
+   * 启停回调由调用方注入（用户/内置写回的文件不同，行内不感知来源）。
+   */
   @Builder
-  ruleRow(entry: UserRuleEntry) {
+  ruleRow(entry: RuleEntryBase, onToggle: (on: boolean) => void) {
     Row({ space: 10 }) {
       SymbolGlyph(entry.kind === UserRuleKind.ALLOW
         ? $r('sys.symbol.checkmark_circle_fill')
@@ -269,7 +334,7 @@ export struct RulesPage {
 
       Toggle({ type: ToggleType.Switch, isOn: entry.enabled })
         .selectedColor($r('app.color.primary'))
-        .onChange((on: boolean) => this.onToggle(entry, on))
+        .onChange((on: boolean) => onToggle(on))
     }
     .width('100%')
     .padding({ top: 10, bottom: 10, left: 2, right: 2 })
@@ -445,6 +510,71 @@ export struct RulesPage {
       .width('92%')
       .margin({ top: 12 })
 
+      // 内置规则卡（随包种子，默认折叠；仅可启停，无增删改）。
+      // 折叠 = layoutWeight 0（头部自然高度）；展开 = 与用户规则卡各半各滚。
+      // 置于用户卡上方而非页底：底部悬浮页签条会遮住贴底卡片。
+      Column({ space: 8 }) {
+        Row({ space: 6 }) {
+          Text('内置规则')
+            .fontSize(14)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.text_primary'))
+          Text(`（${this.builtInEntries.length}）`)
+            .fontSize(12)
+            .fontColor($r('app.color.text_secondary'))
+          Blank()
+          Text(this.builtInSummary)
+            .fontSize(12)
+            .fontColor($r('app.color.text_secondary'))
+          SymbolGlyph(this.builtInExpanded
+            ? $r('sys.symbol.chevron_up')
+            : $r('sys.symbol.chevron_down'))
+            .fontSize(16)
+            .fontColor([$r('app.color.text_secondary')])
+        }
+        .width('100%')
+        .height(32)
+        .onClick(() => this.toggleBuiltInExpand())
+
+        if (this.builtInExpanded) {
+          if (this.builtInEntries.length === 0) {
+            Text('未发现内置规则文件（starter.txt / protected-allow.txt），或其中已无可解析规则')
+              .fontSize(13)
+              .fontColor($r('app.color.text_secondary'))
+              .textAlign(TextAlign.Center)
+              .width('100%')
+              .padding({ top: 16, bottom: 16 })
+          } else {
+            List() {
+              ForEach(this.builtInEntries, (entry: BuiltInRuleEntry) => {
+                ListItem() {
+                  this.ruleRow(entry, (on: boolean): void => {
+                    this.onBuiltInToggle(entry, on);
+                  })
+                }
+              }, (entry: BuiltInRuleEntry) =>
+                `${entry.file}|${entry.domain}|${entry.kind}|${entry.enabled ? '1' : '0'}`)
+            }
+            .width('100%')
+            .layoutWeight(1)
+            .scrollBar(BarState.Off)
+            .transition(TransitionEffect.OPACITY
+              .animation({ duration: 250, curve: Curve.Friction }))
+          }
+
+          Text('内置规则随应用分发，仅可启停（停用 = 文件内 "! " 注释前缀）；如需自定义拦截/放行，请使用下方用户规则。')
+            .fontSize(11)
+            .fontColor($r('app.color.text_secondary'))
+            .width('100%')
+        }
+      }
+      .width('92%')
+      .padding(16)
+      .borderRadius(16)
+      .backgroundColor($r('app.color.card_bg'))
+      .layoutWeight(this.builtInExpanded ? 1 : 0)
+      .margin({ top: 12 })
+
       // 用户规则卡：具体规则内容列表（拦截/放行哪些域名）
       Column({ space: 8 }) {
         Row({ space: 6 }) {
@@ -485,7 +615,9 @@ export struct RulesPage {
           List() {
             ForEach(this.entries, (entry: UserRuleEntry) => {
               ListItem() {
-                this.ruleRow(entry)
+                this.ruleRow(entry, (on: boolean): void => {
+                  this.onToggle(entry, on);
+                })
               }
               .swipeAction({ end: this.rowActions(entry) })
             }, (entry: UserRuleEntry) => `${entry.domain}|${entry.kind}|${entry.enabled ? '1' : '0'}`)

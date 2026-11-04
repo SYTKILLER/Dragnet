@@ -24,12 +24,16 @@ export enum UserRuleKind {
   ALLOW = 'allow'
 }
 
-/** zzz-user-rules.txt 里的一条用户规则（lineIndex 指向文件行，供原位改写）。 */
-export interface UserRuleEntry {
-  lineIndex: number;
+/** 规则条目公共形状（用户/内置规则共享渲染 Builder 用；接口继承而非结构化匹配）。 */
+export interface RuleEntryBase {
   domain: string;
   kind: UserRuleKind;
   enabled: boolean;
+}
+
+/** zzz-user-rules.txt 里的一条用户规则（lineIndex 指向文件行，供原位改写）。 */
+export interface UserRuleEntry extends RuleEntryBase {
+  lineIndex: number;
 }
 
 /** 增删改结果（resolve 结果对象模式，不用裸异常/裸 reject）。 */
