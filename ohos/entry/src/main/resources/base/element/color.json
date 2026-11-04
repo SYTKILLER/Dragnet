@@ -59,6 +59,14 @@
     {
       "name": "card_shadow",
       "value": "#14000000"
+    },
+    {
+      "name": "edit_blue",
+      "value": "#0A59F7"
+    },
+    {
+      "name": "text_on_action",
+      "value": "#FFFFFF"
     }
   ]
 }
