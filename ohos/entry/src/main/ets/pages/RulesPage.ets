@@ -376,7 +376,8 @@ export struct RulesPage {
           .fontSize(13)
           .fontColor(this.statusIsError ? $r('app.color.danger') : $r('app.color.text_secondary'))
           .width('92%')
-          .margin({ bottom: 8 })
+          // 模块纵向节奏统一 12（用户反馈 2/8/12 混用不一致，2026-11-05 修复）
+          .margin({ bottom: 12 })
       }
 
       // 规模卡（引擎当前加载规模，含种子/订阅；用户规则启停后随之变化）
@@ -442,7 +443,7 @@ export struct RulesPage {
           .onClick(() => this.openMatchTest())
       }
       .width('92%')
-      .margin({ top: 2 })
+      .margin({ top: 12 })
 
       // 用户规则卡：具体规则内容列表（拦截/放行哪些域名）
       Column({ space: 8 }) {
