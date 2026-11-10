@@ -1,0 +1,73 @@
+# 罗网 Dragnet 规则订阅（rules-dist）
+# generated_at: 2026-11-10T19:21:49Z
+# label: 2026-11-10
+# sources: anti-AD.txt, AWAvenue.txt, hagezi-multi.txt, starter.txt
+# 本文件由 cmd/ruleexport 自动生成，请勿手改。
+# allow(保护/例外): 65
+# behavior: classical, format: yaml（务必放在阻断规则之前）
+payload:
+- DOMAIN-SUFFIX,12306.cn
+- DOMAIN-SUFFIX,12379.cn
+- DOMAIN-SUFFIX,95516.com
+- DOMAIN-SUFFIX,ad-block.dns.adguard.com
+- DOMAIN-SUFFIX,ad-gone.com
+- DOMAIN-SUFFIX,ad-putting.gw.zt-express.com
+- DOMAIN-SUFFIX,ad.azure.com
+- DOMAIN-SUFFIX,ad.cityu.edu.hk
+- DOMAIN-SUFFIX,ad.jp
+- DOMAIN-SUFFIX,ad.siemens.com.cn
+- DOMAIN-SUFFIX,ads.finance
+- DOMAIN-SUFFIX,ads.privacy.qq.com
+- DOMAIN-SUFFIX,ads.taboola.com
+- DOMAIN-SUFFIX,advertisement.taobao.com
+- DOMAIN-SUFFIX,alipay.com
+- DOMAIN-SUFFIX,alipaydns.com
+- DOMAIN-SUFFIX,analysis.chess.com
+- DOMAIN-SUFFIX,analysis.windows.net
+- DOMAIN-SUFFIX,api.huangye.miui.com
+- DOMAIN-SUFFIX,api.push.apple.com
+- DOMAIN-SUFFIX,app.adjust.com
+- DOMAIN-SUFFIX,app.powerbi.com
+- DOMAIN-SUFFIX,autocomplete.clearbit.com
+- DOMAIN-SUFFIX,baozhang.baidu.com
+- DOMAIN-SUFFIX,cdn.jsdelivr.net
+- DOMAIN-SUFFIX,center-h5api.m.taobao.com
+- DOMAIN-SUFFIX,chart-embed.service.newrelic.com
+- DOMAIN-SUFFIX,counter-strike.net
+- DOMAIN-SUFFIX,dxcloud.episerver.net
+- DOMAIN-SUFFIX,edge-enterprise.activity.windows.com
+- DOMAIN-SUFFIX,edge.activity.windows.com
+- DOMAIN-SUFFIX,ftp.bmp.ovh
+- DOMAIN-SUFFIX,future.biz.weibo.com
+- DOMAIN-SUFFIX,geetest.com
+- DOMAIN-SUFFIX,gov.cn
+- DOMAIN-SUFFIX,insideruser.microsoft.com
+- DOMAIN-SUFFIX,log.mmstat.com
+- DOMAIN-SUFFIX,meizu.coapi.moji.com
+- DOMAIN-SUFFIX,msftconnecttest.com
+- DOMAIN-SUFFIX,msftncsi.com
+- DOMAIN-SUFFIX,news-app.abumedia.yql.yahoo.com
+- DOMAIN-SUFFIX,ntp.aliyun.com
+- DOMAIN-SUFFIX,passport.bobo.com
+- DOMAIN-SUFFIX,push.hicloud.com
+- DOMAIN-SUFFIX,s.mvconf.f.360.cn
+- DOMAIN-SUFFIX,sdkapi.sms.mob.com
+- DOMAIN-SUFFIX,settings-win.data.microsoft.com
+- DOMAIN-SUFFIX,skyapi.onedrive.live.com
+- DOMAIN-SUFFIX,skydrivesync.policies.live.net
+- DOMAIN-SUFFIX,stat.jseea.cn
+- DOMAIN-SUFFIX,stats.gov.cn
+- DOMAIN-SUFFIX,stats.uptimerobot.com
+- DOMAIN-SUFFIX,storage.live.com
+- DOMAIN-SUFFIX,tenpay.com
+- DOMAIN-SUFFIX,time.apple.com
+- DOMAIN-SUFFIX,time.windows.com
+- DOMAIN-SUFFIX,tj.gov.cn
+- DOMAIN-SUFFIX,tongji.cn
+- DOMAIN-SUFFIX,tongji.edu.cn
+- DOMAIN-SUFFIX,tracker.eu.org
+- DOMAIN-SUFFIX,tube.e.kuaishou.com
+- DOMAIN-SUFFIX,uland.taobao.com
+- DOMAIN-SUFFIX,unionpay.com
+- DOMAIN-SUFFIX,widget.intercom.io
+- DOMAIN-SUFFIX,www.msftconnecttest.com
