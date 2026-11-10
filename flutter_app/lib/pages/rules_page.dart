@@ -7,6 +7,7 @@ import '../design/glass_header.dart';
 import '../design/glass_menu.dart';
 import '../design/glass_surface.dart';
 import '../design/glass_tokens.dart';
+import '../services/builtin_rules.dart';
 import '../services/rule_source.dart';
 import '../state/app_controller.dart';
 import 'common_cards.dart';
@@ -36,6 +37,8 @@ class _RulesPageState extends State<RulesPage> {
   void initState() {
     super.initState();
     unawaited(_svc.ensureLoaded(widget.controller.rulesDir));
+    unawaited(
+        BuiltInRulesService.instance.ensureLoaded(widget.controller.rulesDir));
     unawaited(_refreshUserRuleCount());
   }
 
@@ -305,6 +308,9 @@ class _RulesPageState extends State<RulesPage> {
                 onUpdateOne: _updateOne,
               ),
               const SizedBox(height: 16),
+              // ── 内置规则（M5-H+ 对齐：随包种子可视+仅启停，默认折叠）─────
+              _BuiltInCard(controller: widget.controller),
+              const SizedBox(height: 16),
               // ── 用户规则 ────────────────────────────────────────────────
               ContentCard(
                 onTap: _openUserRules,
@@ -443,6 +449,160 @@ class _RulesPageState extends State<RulesPage> {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+// ── 内置规则卡（M5-H+ 对齐：随包种子可视 + 仅启停无增删改，默认折叠）────────
+class _BuiltInCard extends StatefulWidget {
+  const _BuiltInCard({required this.controller});
+
+  final AppController controller;
+
+  @override
+  State<_BuiltInCard> createState() => _BuiltInCardState();
+}
+
+class _BuiltInCardState extends State<_BuiltInCard> {
+  bool _expanded = false;
+
+  BuiltInRulesService get _svc => BuiltInRulesService.instance;
+
+  void _snack(String msg) {
+    ScaffoldMessenger.maybeOf(context)
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+          content: Text(msg),
+          width: 360,
+          behavior: SnackBarBehavior.floating));
+  }
+
+  Future<void> _toggle(BuiltInRuleEntry e) async {
+    if (_svc.busy) return;
+    final wasEnabled = e.enabled;
+    final ok = await _svc.toggle(e);
+    if (!mounted) return;
+    if (!ok) {
+      _snack('启停写盘失败：${e.domain}');
+      return;
+    }
+    // 引擎热切换：停用/启用即时生效（VPN 进程引擎下次 startVpn 生效同鸿蒙口径）
+    final rc = await widget.controller.reloadRules();
+    await widget.controller.refreshRuleInfo();
+    if (!mounted) return;
+    _snack('已${wasEnabled ? '停用' : '启用'} ${e.domain}'
+        '（重载 ${rc == 0 ? 'rc=0' : '失败 rc=$rc'}）');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final total = _svc.entries.length;
+    return ContentCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 头部行（折叠态=整卡）：标题 + 总数 + 摘要 + chevron
+          InkWell(
+            onTap: () => setState(() => _expanded = !_expanded),
+            borderRadius: BorderRadius.circular(10),
+            child: Row(
+              children: [
+                Icon(Icons.tune, size: 20, color: cs.primary),
+                const SizedBox(width: 8),
+                Text('内置规则（$total）',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleSmall
+                        ?.copyWith(fontWeight: FontWeight.w600)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    total == 0
+                        ? '种子文件缺失或为空'
+                        : '拦截 ${_svc.blockCount} · 放行 ${_svc.allowCount}'
+                            '${_svc.disabledCount > 0 ? ' · 停用 ${_svc.disabledCount}' : ''}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                        fontSize: 12, color: cs.onSurfaceVariant),
+                  ),
+                ),
+                AnimatedRotation(
+                  turns: _expanded ? 0.5 : 0,
+                  duration: GlassTokens.motionDuration,
+                  child: Icon(Icons.expand_more,
+                      size: 20, color: cs.onSurfaceVariant),
+                ),
+              ],
+            ),
+          ),
+          if (_expanded && total > 0) ...[
+            const SizedBox(height: 10),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 320),
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: _svc.entries.length,
+                itemBuilder: (context, i) {
+                  final e = _svc.entries[i];
+                  final isBlock = e.kind == BuiltInKind.block;
+                  final color = isBlock ? cs.error : cs.primary;
+                  return Opacity(
+                    opacity: e.enabled ? 1 : 0.5,
+                    child: Row(
+                      children: [
+                        Icon(
+                          isBlock
+                              ? Icons.block_outlined
+                              : Icons.verified_outlined,
+                          size: 18,
+                          color: color,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(e.domain,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  fontSize: 13.5,
+                                  fontFamily: 'monospace',
+                                  color: cs.onSurface)),
+                        ),
+                        if (!e.enabled) ...[
+                          const SizedBox(width: 6),
+                          Text('已停用',
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: cs.onSurfaceVariant)),
+                        ],
+                        const SizedBox(width: 6),
+                        Text(isBlock ? '拦截' : '放行',
+                            style:
+                                TextStyle(fontSize: 11.5, color: color)),
+                        Switch(
+                          value: e.enabled,
+                          onChanged: _svc.busy
+                              ? null
+                              : (_) => unawaited(_toggle(e)),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '启停写回种子文件本身（"! " 注释前缀，重载即时生效）；'
+              '仅可开关，不可增删改。',
+              style: TextStyle(
+                  fontSize: 12, color: cs.onSurfaceVariant, height: 1.5),
+            ),
+          ],
+        ],
       ),
     );
   }

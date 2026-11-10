@@ -152,6 +152,11 @@ go build -tags with_gvisor -o build/dragnet-tun.exe ./cmd/dragnet-tun
 
 ## 更新日志
 
+- 2026-11-11（开发机，M6-B Flutter 功能/体验两件：仪表盘溢出修复 + 内置规则可视启停对齐鸿蒙 M5-H+）：
+  - **仪表盘 RenderFlex 溢出修复（走查 🟡 3.5px 收口）**：新增回归测试 `overflow_repro_test.dart`（1077 物理 px/3.048 dpr=353 逻辑宽复现走查设备口径），复现=6 异常全指向 `common_cards.dart StatTile Column`——根因是仪表盘 `_ProtocolGrid` 的 `childAspectRatio: 2.6`（154.5/2.6=59.4px 定高装不下 20px 数值行+12px 标签行+24 padding≈71px 内容）。修复：纵横比 2.6→2.1（73.6px）+ StatTile 内容垂直居中，测试零异常通过。
+  - **内置规则卡（对齐鸿蒙 M5-H+ 口径）**：新增 `lib/services/builtin_rules.dart`——纯函数（parseBuiltInRuleLine/parseBuiltInRules/toggleBuiltInLine：启用 `||d^`/`@@||d^$important`、停用=`"! "` 前缀形态、普通注释行严格区分；toggle 按行下标翻转、注释/空行原样保留）+ BuiltInRulesService（读 rulesDir/starter.txt+protected-allow.txt，文件缺失=空条目；启停 tmp+rename 原子写回**种子文件本身**，分发"已有不覆盖"→启停态跨启动持久；Android 才落盘，测试纯内存）。RulesPage 新增内置规则卡（订阅源与用户规则之间）：默认折叠=头部行（标题+总数+"拦截 n · 放行 m[ · 停用 k]"摘要+chevron 旋转），点击展开=条目列表（域名+拦截/放行色标+已停用标记+Switch 启停，maxHeight 320 自滚动）+口径说明行；仅启停无增删改；启停后 reloadRules 热切换+refreshRuleInfo（通道契约经 :vpn IPC 生效）。**单测实捕一处真缺陷**：toggle 首版把普通注释行 `! 头注释` 误当停用规则剥前缀（会损坏种子文件）——先判规则形状再翻转，已修。测试 24→32（内置规则 8 用例+溢出回归 1），analyze 零问题，build 通过。
+  - **遗留**：内置规则卡的模拟器视觉检查（截图像素测量）与 :vpn IPC 端到端（启停→自检 BLOCK/NOMATCH 闭环）受 WHPX 不稳限制，机会性窗口验证/移交测试机。
+
 - 2026-11-11（开发机，M6-C 规则资产扩充：starter 45→72 条 + 保护清单 6→17 条 + 验证样本 5→7，verify 7/7）：
   - **starter.txt +27 条**：逐条经本地三大订阅（anti-AD/hagezi-multi/AWAvenue，`||domain^` 精确 grep）在场性佐证后收录——Google/Firebase 补充（app-measurement/crashlytics/amazon-adsystem）、移动广告网络（applovin/chartboost/vungle/inmobi/adcolony/ironsrc）、视图监测与产品分析（moatads/mixpanel/amplitude）、网页广告网络（media.net/33across/sharethrough/sovrn/teads/triplelift）、社媒广告（ads-twitter）、国内补充（beacon.qq.com/bugly.qq.com/gdt.qq.com/log.snssdk.com/tracking.miui.com/cnzz.com/miaozhen.com/admaster.com.cn）。**刻意排除**：mistat.com（三订阅均无佐证）、getui/jpush（应用级推送 SDK，误封=通知全灭，交订阅层处理）、mopub（已死域）。
   - **protected-allow.txt +11 条**（@@…$important，保险性豁免——三大订阅现均未拦截，纯防误杀）：Windows NCSI（msftconnecttest/msftncsi）、系统时间同步（ntp.aliyun/time.windows/time.apple）、OS 级推送（api.push.apple/push.hicloud；注释明示应用级推送 SDK 不保护）、公共 CDN（cdn.jsdelivr.net，anti-AD 历史误封案例）、银联（95516/unionpay）、验证码（geetest）。冒烟实证：msftconnecttest/www 子域/api.push.apple.com 全 ALLOW（list=protected-allow）。

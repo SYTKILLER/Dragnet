@@ -407,7 +407,10 @@ class _ProtocolGrid extends StatelessWidget {
       physics: const NeverScrollableScrollPhysics(),
       mainAxisSpacing: 12,
       crossAxisSpacing: 12,
-      childAspectRatio: 2.6,
+      // M6-B：2.6 → 154.5/2.6=59.4px 定高装不下 StatTile 内容（20px 数值行+
+      // 12px 标签行+24 padding≈71px），测试环境 6 格全溢出 14px（走查 🟡 3.5px
+      // 同源）。2.1 → 73.6px 收口，内容居中。
+      childAspectRatio: 2.1,
       children: [
         StatTile(label: 'TCP 阻断', value: '${s?.tcpBlocked ?? 0}'),
         StatTile(label: 'TCP 转发', value: '${s?.tcpRelayed ?? 0}'),

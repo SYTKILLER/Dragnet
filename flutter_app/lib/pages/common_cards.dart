@@ -47,6 +47,8 @@ class StatTile extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
+        // 定高容器（仪表盘 GridView aspect 钳高）下垂直居中，避免顶部堆积溢出
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Text(
             value,
