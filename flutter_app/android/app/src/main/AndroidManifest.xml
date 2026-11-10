@@ -1,5 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- targetSdk 34+（M6-A 升 36）前台服务合规：VPN 服务以 specialUse 类型常驻 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <application
         android:label="罗网"
         android:name="${applicationName}"
@@ -31,10 +34,19 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- M6-A（2026-11-11）：内核迁独立 :vpn 进程（对齐鸿蒙壳 UI/VPN 分离架构；
+             Go runtime 与 Dart VM 同进程在 WHPX 模拟器上实证致死）。UI 进程经
+             Messenger IPC 访问引擎（同 UID 免 BIND_VPN_SERVICE 校验）。 -->
         <service
             android:name="com.dragnet.app.DragnetVpnService"
+            android:process=":vpn"
             android:exported="false"
-            android:permission="android.permission.BIND_VPN_SERVICE" />
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="vpn_network_adblock" />
+        </service>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

@@ -16,10 +16,12 @@ android {
 
     defaultConfig {
         applicationId = "com.march.dragnet_app"
-        // PoC 壳口径（android/README）：内核链路按 targetSdk 29 验证过；
-        // 正式端（M4）升 targetSdk 时再补 foregroundServiceType/通知合规。
+        // 2026-11-11 M6-A：targetSdk 29 与冷启动 Dart isolate flaky 失败强相关
+        // （探针 36 全过 / 本壳 29 三连挂，证据见 PROGRESS M6-A）——升 36 对齐模板。
+        // 注意：34+ 需 VpnService 前台服务合规（FOREGROUND_SERVICE 权限与
+        // foregroundServiceType），启动拦截链路验证时一并补齐。
         minSdk = 24
-        targetSdk = 29
+        targetSdk = 36
         // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
         // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
         // You can force using the value of versionCode by specifying the `-P force-version-code-ignoring-abi=true`
@@ -35,6 +37,14 @@ android {
         // 内核 .so 由 scripts/build-android.sh 产出（仓库根 build/android/<abi>/）
         getByName("main") {
             jniLibs.srcDir(file("../../../build/android"))
+        }
+    }
+
+    packaging {
+        jniLibs {
+            // M6-A：AGP 9.1 下 abiFilters 未过滤引擎 AAR 的 armeabi-v7a
+            // libflutter（33MB 纯浪费，本工程无 v7a Go .so，v7a 设备本就不可用）
+            excludes += setOf("lib/armeabi-v7a/**")
         }
     }
 

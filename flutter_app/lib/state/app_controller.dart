@@ -154,7 +154,8 @@ class LogsChunk {
   final List<LogEvent> events;
 }
 
-/// 原生桥 + 全局状态。内核运行在同进程 VpnService（与 PoC 壳一致），
+/// 原生桥 + 全局状态。内核自 M6-A（2026-11-11）起运行在独立 :vpn 进程
+///（对齐鸿蒙壳 UI/VPN 分离架构；通道契约不变，Java 侧经 Messenger IPC 透传），
 /// "运行中"判据 = nativeStats() 非 null（对齐鸿蒙端的轮询口径，2s 周期）。
 class AppController extends ChangeNotifier {
   static const _channel = MethodChannel('dragnet/native');
