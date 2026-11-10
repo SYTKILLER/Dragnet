@@ -22,7 +22,10 @@
 
 **测试机网络规程（2026-10-25 用户指示，长期有效，已升级为绝对禁令）**：**绝对禁止在宿主机运行任何会建 TUN/改全局路由/改系统 DNS 的测试**（即使提权、即使短暂）。此类验证一律放进虚拟设备——Android 用 emulator（AVD），Windows/Linux 用 VM（本机有 QEMU、WSL2-Ubuntu，HypervisorPresent=True 支持 WHPX）；虚拟设备内的 TUN/路由/DNS 接管允许，因为不触碰宿主机网络栈。普通应用级下载（curl/sdkmanager/gradle 拉包）不算接管，可正常进行。若历史上曾在宿主机运行，须核验恢复五项（无 dragnet-tun 进程、无 Dragnet 适配器、路由表无 172.19 条目、系统 DNS 回物理网卡、外网连通）。
 
-## 当前状态（更新于 2026-11-02，开发机·M5 双线交付：App 功能扩展一期 + rules-dist 规则资产发布）
+## 当前状态（更新于 2026-11-11，开发机·M6 无人值守夜班三役：Android 冷启动定性+:vpn 重构 / 规则资产扩充 / Flutter 溢出修复+内置规则卡）
+
+- **M6 夜班（2026-11-11，本机三提交 03f59ac/9062f3d/a648e03）**：①M5-A 冷启动 🔴 重新定性=kernel_blob 装载 flaky 失败（引擎源码解码；targetSdk 29=1/4 vs 36=1/1）→ 升 targetSdk 36+FGS 合规；架构疑点实锤（Go+Dart 同进程，今日 5/5 模拟器死亡均在本壳会话窗口，含纯卡 splash 死亡）→ 内核迁 `:vpn` 独立进程（Messenger IPC，Dart 契约零改动，进程分离已实证）；②规则资产：starter 45→72（三订阅在场性佐证）+protected-allow 6→17（NCSI/时间同步/OS 推送/jsdelivr/银联/geetest 保险豁免）+verify 样本 7/7；③Flutter：仪表盘 6 格溢出修复（aspect 2.6→2.1，回归测试钉死）+内置规则可视启停卡（对齐 M5-H+，`! `前缀写回种子本身，单测实捕 toggle 误剥注释缺陷）+规则页数值断言视觉测试；门禁全绿（go 三件套+verify 7/7+analyze 0+test 34/34+build）。**遗留**：:vpn 端到端与走查②-⑥受 WHPX 不稳（今日 5 死）限制→移交测试机/真机清单见更新日志 2026-11-11。
+
 
 - **P0-H 鸿蒙最小链路代码侧+构建+签名+模拟器进程链全部打通（2026-10-27 测试机）**：ohos-go（Go1.27+GOOS=openharmony，TLS GD 修复）交叉编译 libdragnet.so（Go NAPI 模块本体，21.3MB）→ VpnExtensionAbility 三方 VPN 壳 → debug 签名 HAP 构建+安装 → 模拟器实测：.so 加载成功、NAPI 跨语言调用成功、**loadRules=0（内核+引擎+M4-R1 外部规则在 VPN 扩展进程全链路工作）**、VpnConfig 正确送达系统。**卡最后一步**：模拟器镜像缺系统授权对话框应用 com.huawei.hmos.vpndialog（5 个镜像全查证）→ 首次信任授权无法授予 → VpnConnection.create 被拒（"Non-system applications use system APIs"）→ 拿不到 tunFd。定性为**环境限制非代码缺陷**（真机有该系统应用，授权对话框→允许→即可走通）
 - 其余状态同 2026-10-27 开发机收口：M4 六项 R1-R4/R6 完成、R5 草稿待核对；M0-1 定稿、M3 服务化落地；**Flutter 安卓端正式 UI 已交付（P0-A+，2026-11-01，编译验证全绿待模拟器实测）**；Windows Flutter GUI 仍阻塞 VS 安装（用户决策）；R5 核对是仅剩编码/验证项。剩余验证需求：①模拟器可做（M2 清单+订阅热切换+R1 后 Android 需 push 种子+P0-A+ 四 Tab 走查）→ AVD；②Windows 隔离环境（P0-W 终验+CLI/dragnetd 长稳+DNS 接管复测+提权 IPC）→ VM 或授权窗口；③P0-H 终验（create→tunFd→内核上线→DNS 阻断）→ 真机（模拟器信任门槛已定性）
