@@ -30,6 +30,9 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _checkingApp = false;
   bool _checkingRules = false;
   bool _autoRules = true;
+  String _dnsUp = defaultDnsUp;
+  final _dnsCtrl = TextEditingController();
+  bool _savingDns = false;
 
   SubscriptionService get _svc => SubscriptionService.instance;
 
@@ -39,10 +42,38 @@ class _SettingsPageState extends State<SettingsPage> {
     unawaited(_loadConfig());
   }
 
+  @override
+  void dispose() {
+    _dnsCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadConfig() async {
     await _svc.ensureLoaded(widget.controller.rulesDir);
+    final dns = await _svc.readDnsUp();
     if (!mounted) return;
-    setState(() => _autoRules = _svc.appConfig.autoUpdateRules);
+    setState(() {
+      _autoRules = _svc.appConfig.autoUpdateRules;
+      _dnsUp = dns;
+      _dnsCtrl.text = dns;
+    });
+  }
+
+  Future<void> _saveDnsUp() async {
+    if (_savingDns) return;
+    final v = _dnsCtrl.text.trim();
+    if (!isValidIpPort(v)) {
+      _snack('格式需为 ip:port（如 223.5.5.5:53），端口 1-65535');
+      return;
+    }
+    setState(() => _savingDns = true);
+    await _svc.writeDnsUp(v);
+    if (!mounted) return;
+    setState(() {
+      _savingDns = false;
+      _dnsUp = v;
+    });
+    _snack('已保存 $v，下次启动拦截生效');
   }
 
   void _snack(String msg) {
@@ -334,6 +365,102 @@ class _SettingsPageState extends State<SettingsPage> {
                           size: 22, color: cs.onSurfaceVariant),
                   onTap: _checkingRules ? null : _checkRulesNow,
                 ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          // ── 出站 DNS 上游（对齐鸿蒙：预置三选 + 自定义，VPN 启动时读取）──
+          ContentCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.dns_outlined, size: 20, color: cs.primary),
+                    const SizedBox(width: 8),
+                    Text('出站 DNS 上游',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w600)),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text('内核拦截广告后的递归解析上游；保存后下次启动拦截生效',
+                    style:
+                        TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    for (final (i, p) in const [
+                      ('223.5.5.5:53', '阿里'),
+                      ('119.29.29.29:53', '腾讯'),
+                      ('1.1.1.1:53', 'Cloudflare'),
+                    ].indexed)
+                      Expanded(
+                        child: Padding(
+                          padding: EdgeInsets.only(left: i == 0 ? 0 : 8),
+                          child: _ThemeChip(
+                            label: p.$2,
+                            selected: _dnsUp == p.$1,
+                            onTap: () {
+                              _dnsCtrl.text = p.$1;
+                              unawaited(_saveDnsUp());
+                            },
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _dnsCtrl,
+                        enabled: !_savingDns,
+                        textInputAction: TextInputAction.done,
+                        onSubmitted: (_) => unawaited(_saveDnsUp()),
+                        style: const TextStyle(
+                            fontSize: 13.5, fontFamily: 'monospace'),
+                        strutStyle:
+                            const StrutStyle(forceStrutHeight: true, height: 1.25),
+                        decoration: InputDecoration(
+                          isDense: true,
+                          hintText: '自定义 ip:port（如 223.5.5.5:53）',
+                          hintStyle: TextStyle(
+                              fontSize: 12.5,
+                              color: cs.onSurfaceVariant.withValues(alpha: 0.8)),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 10),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    GlassSurface(
+                      height: 40,
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      onTap: _savingDns ? null : () => unawaited(_saveDnsUp()),
+                      child: _savingDns
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2))
+                          : Text('保存',
+                              style: TextStyle(
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: cs.primary)),
+                    ),
+                  ],
+                ),
+                if (!isValidIpPort(_dnsUp)) ...[
+                  const SizedBox(height: 8),
+                  Text('当前值非法，内核将回退默认 $defaultDnsUp',
+                      style: TextStyle(fontSize: 12, color: cs.error)),
+                ],
               ],
             ),
           ),

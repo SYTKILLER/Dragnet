@@ -162,8 +162,9 @@ class DragnetVpnService : VpnService() {
         } else {
             Log.i(TAG, "无外部规则目录，空载运行（fail-open）")
         }
-        val rc = DragnetNative.nativeStartVpn(fd, DNS_UP, MTU)
-        Log.i(TAG, "nativeStartVpn(fd=$fd, dns=$DNS_UP, mtu=$MTU) = $rc")
+        val dnsUp = readDnsUp()
+        val rc = DragnetNative.nativeStartVpn(fd, dnsUp, MTU)
+        Log.i(TAG, "nativeStartVpn(fd=$fd, dns=$dnsUp, mtu=$MTU) = $rc")
         lastStartRc = rc
         if (rc != 0) {
             Log.e(TAG, "内核启动失败 rc=$rc")
@@ -171,6 +172,29 @@ class DragnetVpnService : VpnService() {
             return
         }
         startForeground(NOTIFY_ID, buildNotification())
+    }
+
+    private val dnsUpRegex = Regex("""^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3}):(\d{1,5})$""")
+
+    private fun isValidIpPort(s: String): Boolean {
+        val m = dnsUpRegex.matchEntire(s) ?: return false
+        if ((1..4).any { m.groupValues[it].toInt() > 255 }) return false
+        return m.groupValues[5].toInt() in 1..65535
+    }
+
+    /**
+     * 出站 DNS 上游（M6 对齐鸿蒙）：filesDir/config/dns-up.txt（设置页保存，
+     * VPN 启动时读取）；缺失/为空/非法 → 回退默认，防坏文件阻塞启动。
+     */
+    private fun readDnsUp(): String {
+        return try {
+            val f = File(filesDir, "config/dns-up.txt")
+            val text = if (f.exists()) f.readText().trim() else ""
+            if (text.isNotEmpty() && isValidIpPort(text)) text else DNS_UP
+        } catch (e: Exception) {
+            Log.w(TAG, "dns-up 读取失败，回退默认: ${e.message}")
+            DNS_UP
+        }
     }
 
     private fun stopVpn() {

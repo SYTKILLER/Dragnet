@@ -155,6 +155,10 @@ go build -tags with_gvisor -o build/dragnet-tun.exe ./cmd/dragnet-tun
 
 ## 更新日志
 
+- 2026-11-11（开发机，M6-B2 出站 DNS 上游可配（Android 端对齐鸿蒙设置页缺口））：
+  - 鸿蒙设置页已有"出站 DNS 上游"（预置三选+自定义，filesDir/config/dns-up.txt，VPN 启动时读取，2026-11-01 已有 ip:port 校验），Android 端此前硬编码 223.5.5.5:53——本役补齐。**Dart**：rule_source.dart 增 defaultDnsUp/isValidIpPort 纯函数（四段 0-255+端口 1-65535，容忍首尾空白）+ SubscriptionService.readDnsUp/writeDnsUp（tmp+rename 原子落盘，非 Android no-op）；settings_page.dart 新增"出站 DNS 上游"卡（当前值+三预置 chip=阿里/腾讯/Cloudflare 点选即存+自定义输入+保存校验；非法值红字提示"内核将回退默认"）。**Kotlin**：DragnetVpnService.startVpn 改读 dns-up.txt（isValidIpPort 校验兜底，缺失/空/非法回退 DNS_UP 常量，防坏文件阻塞启动；nativeStartVpn 日志透出实际值）。**单测**：isValidIpPort 14 例+设置页卡结构/保存闭环 widget 测试（测试实捕 writeDnsUp 测试环境漏 no-op 守卫致 spinner 永转 pumpAndSettle 超时——已修）。门禁 analyze 0+test 38/38+build 过。
+  - **方法论回写**：widget 测试 tap 长列表视口外控件必先 `tester.ensureVisible`（hit-test 落空无报错只有 warn）；pumpAndSettle 永超时=有永不停止的动画（典型：busy spinner 因异常卡住不复位）→ 顺着"哪个 setState 没跑"查。
+
 - 2026-11-11（开发机，M6-B Flutter 功能/体验两件：仪表盘溢出修复 + 内置规则可视启停对齐鸿蒙 M5-H+）：
   - **仪表盘 RenderFlex 溢出修复（走查 🟡 3.5px 收口）**：新增回归测试 `overflow_repro_test.dart`（1077 物理 px/3.048 dpr=353 逻辑宽复现走查设备口径），复现=6 异常全指向 `common_cards.dart StatTile Column`——根因是仪表盘 `_ProtocolGrid` 的 `childAspectRatio: 2.6`（154.5/2.6=59.4px 定高装不下 20px 数值行+12px 标签行+24 padding≈71px 内容）。修复：纵横比 2.6→2.1（73.6px）+ StatTile 内容垂直居中，测试零异常通过。
   - **内置规则卡（对齐鸿蒙 M5-H+ 口径）**：新增 `lib/services/builtin_rules.dart`——纯函数（parseBuiltInRuleLine/parseBuiltInRules/toggleBuiltInLine：启用 `||d^`/`@@||d^$important`、停用=`"! "` 前缀形态、普通注释行严格区分；toggle 按行下标翻转、注释/空行原样保留）+ BuiltInRulesService（读 rulesDir/starter.txt+protected-allow.txt，文件缺失=空条目；启停 tmp+rename 原子写回**种子文件本身**，分发"已有不覆盖"→启停态跨启动持久；Android 才落盘，测试纯内存）。RulesPage 新增内置规则卡（订阅源与用户规则之间）：默认折叠=头部行（标题+总数+"拦截 n · 放行 m[ · 停用 k]"摘要+chevron 旋转），点击展开=条目列表（域名+拦截/放行色标+已停用标记+Switch 启停，maxHeight 320 自滚动）+口径说明行；仅启停无增删改；启停后 reloadRules 热切换+refreshRuleInfo（通道契约经 :vpn IPC 生效）。**单测实捕一处真缺陷**：toggle 首版把普通注释行 `! 头注释` 误当停用规则剥前缀（会损坏种子文件）——先判规则形状再翻转，已修。测试 24→32（内置规则 8 用例+溢出回归 1），analyze 零问题，build 通过。

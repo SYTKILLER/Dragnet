@@ -31,6 +31,25 @@ void main() {
     });
   });
 
+
+  group('isValidIpPort（出站 DNS 上游校验，对齐鸿蒙口径）', () {
+    test('合法形态', () {
+      expect(isValidIpPort('223.5.5.5:53'), true);
+      expect(isValidIpPort('119.29.29.29:53'), true);
+      expect(isValidIpPort('1.1.1.1:65535'), true);
+      expect(isValidIpPort(' 223.5.5.5:53 '), true); // 容忍首尾空白
+    });
+    test('非法形态', () {
+      expect(isValidIpPort(''), false);
+      expect(isValidIpPort('223.5.5.5'), false);        // 缺端口
+      expect(isValidIpPort('223.5.5.5:0'), false);      // 端口 0
+      expect(isValidIpPort('223.5.5.5:70000'), false);  // 端口越界
+      expect(isValidIpPort('256.5.5.5:53'), false);     // 段越界
+      expect(isValidIpPort('dns.example.com:53'), false);
+      expect(isValidIpPort('223.5.5.5:53.1'), false);
+    });
+  });
+
   group('formatUserRuleLine（zzz-user-rules.txt 行格式）', () {
     test('拦截形态 ||domain^', () {
       expect(formatUserRuleLine('ads.example.com', allow: false),

@@ -97,6 +97,23 @@ List<UserRuleEntry> parseUserRules(String text) {
   return out;
 }
 
+// ── 出站 DNS 上游（M6 对齐鸿蒙 DragnetService.readDnsUp/writeDnsUp）────────
+// 落 filesDir/config/dns-up.txt，VPN 启动时内核读取；UI 保存前校验 ip:port。
+
+const String defaultDnsUp = '223.5.5.5:53';
+
+/// ip:port 合法性（四段 0-255 + 端口 1-65535；对齐鸿蒙 2026-11-01 校验口径）。
+bool isValidIpPort(String s) {
+  final m = RegExp(r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3}):(\d{1,5})$')
+      .firstMatch(s.trim());
+  if (m == null) return false;
+  for (var i = 1; i <= 4; i++) {
+    if (int.parse(m.group(i)!) > 255) return false;
+  }
+  final port = int.parse(m.group(5)!);
+  return port >= 1 && port <= 65535;
+}
+
 // ── 模型 ───────────────────────────────────────────────────────────────────
 
 /// 应用级配置（filesDir/config/app-config.json）。
@@ -301,6 +318,7 @@ class SubscriptionService extends ChangeNotifier {
   String get _appConfigPath => joinPath(configDir, 'app-config.json');
   String get _userRulesPath => joinPath(rulesDir, userRulesFileName);
   String get _metaDir => joinPath(configDir, 'sources');
+  String get _dnsUpPath => joinPath(configDir, 'dns-up.txt');
 
   String sourceRulePath(String id) => joinPath(rulesDir, '$id.txt');
   String sourceMetaPath(String id) => joinPath(_metaDir, '$id.meta.json');
@@ -640,6 +658,34 @@ class SubscriptionService extends ChangeNotifier {
         lines.isEmpty ? '' : '${lines.join('\n')}\n',
         flush: true);
     await tmp.rename(_userRulesPath);
+  }
+
+  // ── 出站 DNS 上游（内核 startVpn 时读取；UI 保存前校验，服务读取兜底再校验）──
+
+  Future<String> readDnsUp() async {
+    if (!_canWrite) return defaultDnsUp;
+    try {
+      final f = File(_dnsUpPath);
+      if (!await f.exists()) return defaultDnsUp;
+      final text = (await f.readAsString()).trim();
+      return text.isEmpty ? defaultDnsUp : text;
+    } catch (e) {
+      debugPrint('dns-up 读取失败: $e');
+      return defaultDnsUp;
+    }
+  }
+
+  Future<void> writeDnsUp(String value) async {
+    if (!_canWrite) return; // 测试环境纯内存 no-op（对齐本服务其他写路径）
+    try {
+      final dir = Directory(configDir);
+      if (!await dir.exists()) await dir.create(recursive: true);
+      final tmp = File('$_dnsUpPath.tmp');
+      await tmp.writeAsString(value, flush: true);
+      await tmp.rename(_dnsUpPath);
+    } catch (e) {
+      debugPrint('dns-up 写盘失败: $e');
+    }
   }
 
   // ── 种子分发（M4-R1 规则可见性）────────────────────────────────────────────
