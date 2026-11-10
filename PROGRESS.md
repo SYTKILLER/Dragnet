@@ -155,6 +155,8 @@ go build -tags with_gvisor -o build/dragnet-tun.exe ./cmd/dragnet-tun
 
 ## 更新日志
 
+- 2026-11-11（开发机，夜班收尾记录）：机会性模拟器突袭再试 2 次（boot#5 走查窗口、boot#6 :vpn IPC 匹配自检取证），均在 App 启动 13~60s 窗口内整机死亡（第 6 次连 screencap 都未及执行），**今日累计 6 启动 6 死，:vpn 重构与 targetSdk 36 均未能阻止**——WHPX 与本壳共存性问题升级为"本机模拟器对本壳运行级验证不可用"的最终定性（对照：探针 3/3 稳、PoC 内核 15min 长稳过），运行验证全量移交测试机/真机（清单见 M6-A 条目）。宿主机侧全部可确定性交付已完成：六提交 213469e/03f59ac/9062f3d/a648e03/2abb540/071812e（go 三件套+verify 7/7+analyze 0+test 38/38+build 全绿）。夜班后剩余事项=移交测试清单执行 + 鸿蒙端 M6-D（下次会话按知识库规程开工）。
+
 - 2026-11-11（开发机，M6-B2 出站 DNS 上游可配（Android 端对齐鸿蒙设置页缺口））：
   - 鸿蒙设置页已有"出站 DNS 上游"（预置三选+自定义，filesDir/config/dns-up.txt，VPN 启动时读取，2026-11-01 已有 ip:port 校验），Android 端此前硬编码 223.5.5.5:53——本役补齐。**Dart**：rule_source.dart 增 defaultDnsUp/isValidIpPort 纯函数（四段 0-255+端口 1-65535，容忍首尾空白）+ SubscriptionService.readDnsUp/writeDnsUp（tmp+rename 原子落盘，非 Android no-op）；settings_page.dart 新增"出站 DNS 上游"卡（当前值+三预置 chip=阿里/腾讯/Cloudflare 点选即存+自定义输入+保存校验；非法值红字提示"内核将回退默认"）。**Kotlin**：DragnetVpnService.startVpn 改读 dns-up.txt（isValidIpPort 校验兜底，缺失/空/非法回退 DNS_UP 常量，防坏文件阻塞启动；nativeStartVpn 日志透出实际值）。**单测**：isValidIpPort 14 例+设置页卡结构/保存闭环 widget 测试（测试实捕 writeDnsUp 测试环境漏 no-op 守卫致 spinner 永转 pumpAndSettle 超时——已修）。门禁 analyze 0+test 38/38+build 过。
   - **方法论回写**：widget 测试 tap 长列表视口外控件必先 `tester.ensureVisible`（hit-test 落空无报错只有 warn）；pumpAndSettle 永超时=有永不停止的动画（典型：busy spinner 因异常卡住不复位）→ 顺着"哪个 setState 没跑"查。
