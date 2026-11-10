@@ -7,3 +7,5 @@ googlesyndication.com	block	Google 广告（starter+全订阅覆盖）
 www.google-analytics.com	block	GA 跟踪（anti-AD+hagezi）
 ads.example.com	nomatch	example.com 保留域：仅语义夹具使用，样本集本身不含该规则
 www.baidu.com	nomatch	国内主流站不得误杀（反例哨兵）
+beacon.qq.com	block	腾讯灯塔遥测（2026-11-11 M6-C：starter+全订阅覆盖）
+msftconnecttest.com	allow	Windows NCSI（2026-11-11 M6-C：protected-allow 覆盖）

@@ -14,3 +14,23 @@
 @@||12306.cn^$important
 ! gov.cn —— 政府域名整体豁免
 @@||gov.cn^$important
+! ---- 2026-11-11 扩充（M6-C）：非广告基础服务域保险性豁免；经三大订阅在场性核查，
+! ---- 现有订阅均未拦截（纯保险），但均为"误封即灾难"的公用基础设施，宁可漏封。
+! msftconnecttest.com / msftncsi.com —— Windows 网络连接判定（NCSI，误封=系统显示无网）
+@@||msftconnecttest.com^$important
+@@||msftncsi.com^$important
+! ntp.aliyun.com / time.windows.com / time.apple.com —— 系统时间同步（误封=证书校验失败）
+@@||ntp.aliyun.com^$important
+@@||time.windows.com^$important
+@@||time.apple.com^$important
+! api.push.apple.com / push.hicloud.com —— OS 级推送（APNs/华为 HMS，误封=通知全灭；
+! 注意：应用级推送 SDK（getui/jpush）被主流订阅按跟踪域处理，不在保护之列）
+@@||api.push.apple.com^$important
+@@||push.hicloud.com^$important
+! cdn.jsdelivr.net —— 公共 CDN（anti-AD 历史误封案例，开发者常用）
+@@||cdn.jsdelivr.net^$important
+! 95516.com / unionpay.com —— 银联（云闪付/支付通道）
+@@||95516.com^$important
+@@||unionpay.com^$important
+! geetest.com —— 国内验证码服务（误封=登录/风控不可用）
+@@||geetest.com^$important

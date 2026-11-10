@@ -47,3 +47,43 @@
 ||sensorsdata.cn^
 ||tanx.com^
 ||mmstat.com^
+
+! ---- 2026-11-11 扩充（M6-C）：逐条经 anti-AD/hagezi/AWAvenue 三大订阅在场性佐证，专用广告/遥测域 ----
+! ---- Google/Firebase 补充 ----
+||app-measurement.com^
+||crashlytics.com^
+||amazon-adsystem.com^
+
+! ---- 移动广告网络 ----
+||applovin.com^
+||chartboost.com^
+||vungle.com^
+||inmobi.com^
+||adcolony.com^
+||ironsrc.com^
+
+! ---- 视图监测/产品分析 ----
+||moatads.com^
+||mixpanel.com^
+||amplitude.com^
+
+! ---- 网页广告网络补充 ----
+||media.net^
+||33across.com^
+||sharethrough.com^
+||sovrn.com^
+||teads.tv^
+||triplelift.com^
+
+! ---- 社媒广告 ----
+||ads-twitter.com^
+
+! ---- 国内补充（腾讯灯塔/Crashlytics 类/广点通/字节日志/小米遥测/友盟 CNZZ/秒针系） ----
+||beacon.qq.com^
+||bugly.qq.com^
+||gdt.qq.com^
+||log.snssdk.com^
+||tracking.miui.com^
+||cnzz.com^
+||miaozhen.com^
+||admaster.com.cn^
