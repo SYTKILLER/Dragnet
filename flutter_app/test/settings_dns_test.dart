@@ -43,6 +43,14 @@ void main() {
     await tester.pumpAndSettle(const Duration(seconds: 2));
 
     // 结构：标题 + 三预置 chip + 自定义输入框 + 保存钮
+    // （_SettingsRow 改标题/副标题上下排布后列表更高，DNS 卡滚出初始
+    //  cacheExtent——ListView 懒构建，先滚动到卡位再断言）
+    await tester.scrollUntilVisible(
+      find.text('出站 DNS 上游'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle(const Duration(milliseconds: 300));
     expect(find.text('出站 DNS 上游'), findsOneWidget);
     expect(find.text('阿里'), findsOneWidget);
     expect(find.text('腾讯'), findsOneWidget);

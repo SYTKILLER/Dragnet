@@ -33,10 +33,11 @@ void main() {
     expect(find.text('罗网 Dragnet'), findsWidgets);
     expect(find.text('拦截已停止'), findsOneWidget);
 
-    // 切到统计 Tab
-    await tester.tap(find.text('统计').last);
+    // 切到日志 Tab（2026-11-22 UI 评审：统计与首页计数重复撤下，日志升一级）
+    await tester.tap(find.text('日志').last);
     await tester.pumpAndSettle(const Duration(seconds: 3));
-    expect(find.text('内核未运行'), findsOneWidget);
+    expect(find.text('全部'), findsOneWidget); // 日志过滤 chips
+    expect(find.text('转发日志'), findsWidgets);
 
     // 切到设置 Tab
     await tester.tap(find.text('设置').last);

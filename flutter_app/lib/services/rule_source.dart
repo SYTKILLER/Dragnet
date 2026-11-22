@@ -319,6 +319,7 @@ class SubscriptionService extends ChangeNotifier {
   String get _userRulesPath => joinPath(rulesDir, userRulesFileName);
   String get _metaDir => joinPath(configDir, 'sources');
   String get _dnsUpPath => joinPath(configDir, 'dns-up.txt');
+  String get _themeModePath => joinPath(configDir, 'theme-mode.txt');
 
   String sourceRulePath(String id) => joinPath(rulesDir, '$id.txt');
   String sourceMetaPath(String id) => joinPath(_metaDir, '$id.meta.json');
@@ -685,6 +686,37 @@ class SubscriptionService extends ChangeNotifier {
       await tmp.rename(_dnsUpPath);
     } catch (e) {
       debugPrint('dns-up 写盘失败: $e');
+    }
+  }
+
+  // ── 主题模式持久化（config/theme-mode.txt：system|light|dark）──────────
+
+  Future<String> readThemeMode() async {
+    if (!_canWrite) return 'system';
+    try {
+      final f = File(_themeModePath);
+      if (!await f.exists()) return 'system';
+      final text = (await f.readAsString()).trim();
+      return switch (text) {
+        'light' || 'dark' => text,
+        _ => 'system',
+      };
+    } catch (e) {
+      debugPrint('theme-mode 读取失败: $e');
+      return 'system';
+    }
+  }
+
+  Future<void> writeThemeMode(String value) async {
+    if (!_canWrite) return; // 测试环境纯内存 no-op（对齐本服务其他写路径）
+    try {
+      final dir = Directory(configDir);
+      if (!await dir.exists()) await dir.create(recursive: true);
+      final tmp = File('$_themeModePath.tmp');
+      await tmp.writeAsString(value, flush: true);
+      await tmp.rename(_themeModePath);
+    } catch (e) {
+      debugPrint('theme-mode 写盘失败: $e');
     }
   }
 

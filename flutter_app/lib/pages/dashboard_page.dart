@@ -1,18 +1,16 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import '../design/glass_header.dart';
+import '../design/glass_scope.dart';
 import '../design/glass_surface.dart';
 import '../design/glass_tokens.dart';
 import '../state/app_controller.dart';
 import 'common_cards.dart';
-import 'logs_page.dart';
-import 'match_test_page.dart';
 
-/// 首页仪表盘（对齐鸿蒙 DashboardPage 口径）：状态主卡 + 拦截开关 +
-/// 操作入口（转发日志/匹配自检）+ DNS 查询占比 + TCP/UDP 概览 +
-/// 启动失败原因（lastError）透出。
+/// 首页仪表盘：Hero 主卡（状态 + 一键启停合并，运行态主色实心钮 + 微光
+/// 外环）+ 顶部环境光 + DNS 查询占比 + TCP/UDP 概览 + 启动失败原因
+/// （lastError）透出。转发日志已升一级 Tab、匹配自检仅保留规则页入口
+/// （2026-11-22 UI 评审口径），首页不再放操作入口卡。
 class DashboardPage extends StatelessWidget {
   const DashboardPage({super.key, required this.controller});
 
@@ -27,68 +25,47 @@ class DashboardPage extends StatelessWidget {
         animation: controller,
         builder: (context, _) {
           final cs = Theme.of(context).colorScheme;
-          return ListView(
-            padding: EdgeInsets.fromLTRB(
-                16, statusBar + GlassTokens.headerRowHeight + 12, 16, 16),
+          return Stack(
+            fit: StackFit.expand,
             children: [
-              _StatusCard(controller: controller),
-              const SizedBox(height: 16),
-              _PowerSwitch(controller: controller),
-              const SizedBox(height: 16),
-              // 操作区：转发日志 + 匹配自检（并排，风格同规则页入口卡）
-              // ⛔ 滚动区无界高度，禁 stretch（等高靠两侧内容结构一致自然对齐）
-              Row(
+              // ⓪ 底层环境光：给玻璃搭折射舞台（画在列表背后，不建图层）
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                height: 320,
+                child: _AmbientGlow(running: controller.running),
+              ),
+              ListView(
+                padding: EdgeInsets.fromLTRB(
+                    16, statusBar + GlassTokens.headerRowHeight + 12, 16, 16),
                 children: [
-                  Expanded(
-                    child: _EntryCard(
-                      controller: controller,
-                      icon: Icons.receipt_long_outlined,
-                      title: '转发日志',
-                      caption: 'DNS/TCP/UDP 判定',
-                      onTap: () => unawaited(Navigator.of(context).push(
-                          MaterialPageRoute(
-                              builder: (_) =>
-                                  LogsPage(controller: controller)))),
+                  _HeroCard(controller: controller),
+                  const SizedBox(height: 16),
+                  _DnsShareCard(controller: controller),
+                  const SizedBox(height: 16),
+                  _ProtocolGrid(controller: controller),
+                  if (controller.startError != null) ...[
+                    const SizedBox(height: 16),
+                    ContentCard(
+                      padding: const EdgeInsets.all(14),
+                      child: Row(
+                        children: [
+                          Icon(Icons.error_outline, size: 20, color: cs.error),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              controller.startError!,
+                              style: TextStyle(fontSize: 13, color: cs.error),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _EntryCard(
-                      controller: controller,
-                      icon: Icons.fact_check_outlined,
-                      title: '匹配自检',
-                      caption: '输入域名查判定',
-                      onTap: () => unawaited(Navigator.of(context).push(
-                          MaterialPageRoute(
-                              builder: (_) =>
-                                  MatchTestPage(controller: controller)))),
-                    ),
-                  ),
+                  ],
+                  const SizedBox(height: 24),
                 ],
               ),
-              const SizedBox(height: 16),
-              _DnsShareCard(controller: controller),
-              const SizedBox(height: 16),
-              _ProtocolGrid(controller: controller),
-              if (controller.startError != null) ...[
-                const SizedBox(height: 16),
-                ContentCard(
-                  padding: const EdgeInsets.all(14),
-                  child: Row(
-                    children: [
-                      Icon(Icons.error_outline, size: 20, color: cs.error),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          controller.startError!,
-                          style: TextStyle(fontSize: 13, color: cs.error),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-              const SizedBox(height: 24),
             ],
           );
         },
@@ -97,8 +74,39 @@ class DashboardPage extends StatelessWidget {
   }
 }
 
-class _StatusCard extends StatelessWidget {
-  const _StatusCard({required this.controller});
+/// 顶部环境光：液态玻璃的底色若纯平发灰，折射就没了舞台——运行中透出
+/// 主色（深青）微光，已停止收束为冷灰。RadialGradient 顶心扩散，仅在
+/// 首屏上半区，随运行状态 500ms 过渡。
+class _AmbientGlow extends StatelessWidget {
+  const _AmbientGlow({required this.running});
+
+  final bool running;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final accent = running ? cs.primary : cs.onSurfaceVariant;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 500),
+      curve: Curves.easeOut,
+      decoration: BoxDecoration(
+        gradient: RadialGradient(
+          center: const Alignment(0, -1.15),
+          radius: 1.5,
+          colors: [
+            accent.withValues(alpha: running ? 0.14 : 0.06),
+            accent.withValues(alpha: 0),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Hero 主卡：状态与启停合一。左侧 72px 电源钮（运行=主色实心 + 柔和外环
+/// 微光；停止=玻璃/材质底 + 描边），右侧状态标题 + 运行时长 + 规则规模。
+class _HeroCard extends StatelessWidget {
+  const _HeroCard({required this.controller});
 
   final AppController controller;
 
@@ -107,7 +115,7 @@ class _StatusCard extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final running = controller.running;
     final starting = controller.starting;
-    final accent = running ? cs.primary : cs.onSurfaceVariant;
+    final info = controller.ruleInfo;
     // 启动失败原因透出（方向1 功能4）：未运行且 lastStartRc≠0 → 显示 lastError
     final showKernelError = !running &&
         !starting &&
@@ -120,28 +128,8 @@ class _StatusCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  color: accent.withValues(alpha: 0.12),
-                  shape: BoxShape.circle,
-                ),
-                child: starting
-                    ? Padding(
-                        padding: const EdgeInsets.all(14),
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2.4, color: accent),
-                      )
-                    : Icon(
-                        running
-                            ? Icons.verified_user_outlined
-                            : Icons.shield_outlined,
-                        size: 28,
-                        color: accent,
-                      ),
-              ),
-              const SizedBox(width: 14),
+              _PowerButton(controller: controller),
+              const SizedBox(width: 16),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -157,15 +145,29 @@ class _StatusCard extends StatelessWidget {
                           .titleMedium
                           ?.copyWith(fontWeight: FontWeight.w700),
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 4),
                     Text(
                       running
-                          ? '已运行 ${formatUptime(controller.stats!.uptimeSec)}'
+                          ? '已运行 ${formatUptime(controller.stats?.uptimeSec ?? 0)}'
                           : '域名级广告 / 跟踪器拦截',
                       style: TextStyle(
-                          fontSize: 13,
-                          color: running ? cs.primary : cs.onSurfaceVariant),
+                        fontSize: 13,
+                        color: running ? cs.primary : cs.onSurfaceVariant,
+                      ),
                     ),
+                    if (info != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        '${info.lists} 个规则列表 · ${info.ruleLines} 行',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: cs.onSurfaceVariant,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -207,59 +209,10 @@ class _StatusCard extends StatelessWidget {
   }
 }
 
-/// 操作区入口卡（风格同规则页入口卡，半宽两列并排）。
-class _EntryCard extends StatelessWidget {
-  const _EntryCard({
-    required this.controller,
-    required this.icon,
-    required this.title,
-    required this.caption,
-    required this.onTap,
-  });
-
-  final AppController controller;
-  final IconData icon;
-  final String title;
-  final String caption;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return ContentCard(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      onTap: onTap,
-      child: Row(
-        children: [
-          Icon(icon, size: 20, color: cs.primary),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w600,
-                        color: cs.onSurface)),
-                Text(caption,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        fontSize: 11, color: cs.onSurfaceVariant)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PowerSwitch extends StatelessWidget {
-  const _PowerSwitch({required this.controller});
+/// 电源钮：一键开启全机防护的 Hero 锚点。运行态主色实心圆 + 外环微光；
+/// 停止态回退各自档位的卡底（液态=膜、材质=surfaceContainerHigh）。
+class _PowerButton extends StatelessWidget {
+  const _PowerButton({required this.controller});
 
   final AppController controller;
 
@@ -268,24 +221,57 @@ class _PowerSwitch extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final running = controller.running;
     final busy = controller.starting;
-    return Center(
-      child: GlassSurface(
-        circle: true,
+    final idleFill = GlassMaterialScope.isLiquid(context)
+        ? GlassTokens.fill(cs)
+        : GlassTokens.materialFill(cs);
+    return GlassPressable(
+      onTap: busy
+          ? null
+          : () {
+              if (running) {
+                controller.stopBlock();
+              } else {
+                controller.startBlock();
+              }
+            },
+      builder: (_, pressed) => AnimatedContainer(
+        duration: GlassTokens.pressDuration,
+        curve: GlassTokens.pressCurve,
+        width: 72,
         height: 72,
-        onTap: busy
-            ? null
-            : () {
-                if (running) {
-                  controller.stopBlock();
-                } else {
-                  controller.startBlock();
-                }
-              },
-        child: Icon(
-          Icons.power_settings_new,
-          size: 32,
-          color: running ? cs.primary : cs.onSurfaceVariant,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: running
+              ? cs.primary
+              : (pressed ? GlassTokens.pressedFill(cs) : idleFill),
+          boxShadow: running
+              ? [
+                  // 柔和外环微光：Hero 的"开机"仪式感（非玻璃件，允许投影）
+                  BoxShadow(
+                    color: cs.primary.withValues(alpha: 0.32),
+                    blurRadius: 22,
+                    spreadRadius: 2,
+                    offset: const Offset(0, 3),
+                  ),
+                ]
+              : const [],
+          border: running
+              ? null
+              : Border.all(color: GlassTokens.stroke(cs), width: 0.6),
         ),
+        child: busy
+            ? Padding(
+                padding: const EdgeInsets.all(20),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.6,
+                  color: running ? cs.onPrimary : cs.primary,
+                ),
+              )
+            : Icon(
+                Icons.power_settings_new,
+                size: 34,
+                color: running ? cs.onPrimary : cs.onSurfaceVariant,
+              ),
       ),
     );
   }
@@ -332,19 +318,21 @@ class _DnsShareCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(3),
             child: SizedBox(
               height: 6,
-              child: Row(
-                children: [
-                  Expanded(
-                    flex: total == 0 ? 1 : blocked,
-                    child: ColoredBox(color: cs.error),
-                  ),
-                  Expanded(
-                    flex: total == 0 ? 1 : forwarded,
-                    child: ColoredBox(
-                        color: cs.primary.withValues(alpha: 0.45)),
-                  ),
-                ],
-              ),
+              // ⛔ 无查询时不画 1:1 红/青（会被读成"50% 被拦截"），渲染纯灰底轨
+              child: total == 0
+                  ? ColoredBox(
+                      color: cs.onSurfaceVariant.withValues(alpha: 0.12))
+                  : Row(
+                      children: [
+                        Expanded(
+                          child: ColoredBox(color: cs.error),
+                        ),
+                        Expanded(
+                          child: ColoredBox(
+                              color: cs.primary.withValues(alpha: 0.45)),
+                        ),
+                      ],
+                    ),
             ),
           ),
           const SizedBox(height: 6),
@@ -379,9 +367,12 @@ class _ShareItem extends StatelessWidget {
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
         const SizedBox(width: 8),
+        // tabularFigures：轮询刷新时数字宽度稳定，不左右微抖
         Text(value,
             style: const TextStyle(
-                fontSize: 18, fontWeight: FontWeight.w700)),
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                fontFeatures: [FontFeature.tabularFigures()])),
         const SizedBox(width: 6),
         Text(label,
             style: TextStyle(

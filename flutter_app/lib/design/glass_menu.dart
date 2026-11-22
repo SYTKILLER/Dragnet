@@ -156,37 +156,32 @@ class _GlassMenuPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    // 卷开（指南 §9.1）：外层从触发件大小撑到成品，内层反向抵消——内容
-    // 全程自然尺寸待在原地，未卷到的部分由玻璃自身形状裁掉。
-    final panel = GlassBackendOverride(
-      backend: backend,
-      child: GlassSurface(
-        height: null,
-        width: null,
-        materialize: _materialize.value,
-        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            for (var i = 0; i < options.length; i++) ...[
-              _GlassMenuEntryReveal(
-                progress: animation,
-                startShare: options.length <= 1 ? 0 : (i / (options.length * 2)),
-                child: _GlassMenuRow(option: options[i], colorScheme: cs),
+    // 卷开（指南 §9.1）：外层缩放只作用在【玻璃】上（面板从触发件大小撑开），
+    // 内容在内层反缩放抵消、全程自然尺寸待在原地；裁剪层夹在两缩放之间，
+    // "未卷到的部分"由外层缩放后的面板矩形裁掉——玻璃与裁剪区随帧同步缩放。
+    // ⛔ 内层 Transform 只许包内容、不许包玻璃（两几何变换同链相乘归一，
+    //    卷开会完全抵消）；materialize 必须进 builder 随帧取值（本 build
+    //    在路由侧每条动画只跑一次，静态读取会冻结在初值）。
+    final content = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (var i = 0; i < options.length; i++) ...[
+          _GlassMenuEntryReveal(
+            progress: animation,
+            startShare: options.length <= 1 ? 0 : (i / (options.length * 2)),
+            child: _GlassMenuRow(option: options[i], colorScheme: cs),
+          ),
+          if (i < options.length - 1)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Container(
+                height: 1,
+                color: cs.outlineVariant.withValues(alpha: 0.35),
               ),
-              if (i < options.length - 1)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  child: Container(
-                    height: 1,
-                    color: cs.outlineVariant.withValues(alpha: 0.35),
-                  ),
-                ),
-            ],
-          ],
-        ),
-      ),
+            ),
+        ],
+      ],
     );
 
     // 起手缩放 = anchor.size / panel.size（量不出时 fallback (0.90, 0.32)）
@@ -194,23 +189,36 @@ class _GlassMenuPanel extends StatelessWidget {
       parent: animation,
       curve: const Interval(0, 1, curve: Curves.easeOutCubic),
     );
-    return AnimatedBuilder(
-      animation: entry,
-      builder: (context, child) {
-        final t = entry.value.clamp(0.0, 1.0);
-        final sx = (0.90 + (1 - 0.90) * t);
-        final sy = (0.32 + (1 - 0.32) * t);
-        return Transform(
-          alignment: origin,
-          transform: _scale(sx, sy),
-          child: Transform(
+    return GlassBackendOverride(
+      backend: backend,
+      child: AnimatedBuilder(
+        animation: entry,
+        builder: (context, content) {
+          final t = entry.value.clamp(0.0, 1.0);
+          final sx = (0.90 + (1 - 0.90) * t);
+          final sy = (0.32 + (1 - 0.32) * t);
+          return Transform(
             alignment: origin,
-            transform: _scale(1 / sx, 1 / sy),
-            child: child,
-          ),
-        );
-      },
-      child: panel,
+            transform: _scale(sx, sy),
+            child: GlassSurface(
+              height: null,
+              width: null,
+              materialize: _materialize.value,
+              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
+              child: ClipRRect(
+                borderRadius:
+                    BorderRadius.circular(GlassTokens.pillHeight / 2),
+                child: Transform(
+                  alignment: origin,
+                  transform: _scale(1 / sx, 1 / sy),
+                  child: content,
+                ),
+              ),
+            ),
+          );
+        },
+        child: content,
+      ),
     );
   }
 

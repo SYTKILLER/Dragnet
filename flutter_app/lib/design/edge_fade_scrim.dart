@@ -102,9 +102,11 @@ class EdgeFadeScrim extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    // 蒙层基色 = surface；alpha 由渐变自带
+    // 蒙层基色 = surface；alpha 由渐变自带。⛔ c.a 在新 Color API 里已是
+    // 0.0~1.0（旧 .opacity 时代才需要 /255 归一），再除一次会只剩 ~0.003，
+    // 顶栏/底栏的"溶出"几乎全透明。
     final colors = [
-      for (final c in gradient.colors) cs.surface.withValues(alpha: c.a / 255)
+      for (final c in gradient.colors) cs.surface.withValues(alpha: c.a)
     ];
     return SizedBox(
       height: height,

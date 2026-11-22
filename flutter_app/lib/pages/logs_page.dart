@@ -10,14 +10,19 @@ import '../design/glass_tokens.dart';
 import '../services/rule_source.dart';
 import '../state/app_controller.dart';
 import 'common_cards.dart';
+import 'home_shell.dart';
 
 /// 转发日志页（方向1 功能2）：进入 logs(0) 全量拉一次，之后 1.5s 增量轮询
-/// （返回 cursor）；本页通过 Navigator.push 打开，出栈 dispose 即停轮询。
-/// 点行可把域名写入用户规则（zzz-user-rules.txt）并热切换。
+/// （返回 cursor）。push 独立打开时出栈 dispose 即停轮询；作为一级 Tab 嵌入
+/// （tabIndex 非空）时随 Tab 切换显停轮询、无返回键。点行可把域名写入
+/// 用户规则并热切换。
 class LogsPage extends StatefulWidget {
-  const LogsPage({super.key, required this.controller});
+  const LogsPage({super.key, required this.controller, this.tabIndex});
 
   final AppController controller;
+
+  /// 非空 = 作为一级 Tab 嵌入 IndexedStack（无返回键，随 Tab 显停轮询）
+  final int? tabIndex;
 
   @override
   State<LogsPage> createState() => _LogsPageState();
@@ -31,21 +36,48 @@ class _LogsPageState extends State<LogsPage> {
   int _cursor = 0;
   bool _pulling = false;
   bool _showFab = false;
+  bool _active = true;
   String _filter = 'all'; // all | block | allow | forward
   Timer? _timer;
+
+  bool get _embedded => widget.tabIndex != null;
 
   @override
   void initState() {
     super.initState();
-    unawaited(Future.microtask(_poll)); // 进入即全量拉一次
-    _timer = Timer.periodic(const Duration(milliseconds: 1500), (_) {
+    _active = !_embedded || homeShellIndex.value == widget.tabIndex;
+    homeShellIndex.addListener(_onShellIndexChanged);
+    if (_active) unawaited(Future.microtask(_poll)); // 进入即全量拉一次
+    _startTimer();
+    _scroll.addListener(_onScroll);
+  }
+
+  void _onShellIndexChanged() {
+    _setActive(!_embedded || homeShellIndex.value == widget.tabIndex);
+  }
+
+  /// 非活动 Tab 时停轮询（IndexedStack 常驻所有页，不显停就等于全生命周期 1.5s 空转）
+  void _setActive(bool active) {
+    if (_active == active) return;
+    _active = active;
+    if (active) {
+      unawaited(_poll()); // 回到本 Tab 立刻补一次增量
+      _startTimer();
+    } else {
+      _timer?.cancel();
+      _timer = null;
+    }
+  }
+
+  void _startTimer() {
+    _timer ??= Timer.periodic(const Duration(milliseconds: 1500), (_) {
       unawaited(_poll());
     });
-    _scroll.addListener(_onScroll);
   }
 
   @override
   void dispose() {
+    homeShellIndex.removeListener(_onShellIndexChanged);
     _timer?.cancel();
     _scroll.removeListener(_onScroll);
     _scroll.dispose();
@@ -58,7 +90,7 @@ class _LogsPageState extends State<LogsPage> {
   }
 
   Future<void> _poll() async {
-    if (_pulling || !mounted) return;
+    if (_pulling || !mounted || !_active) return;
     _pulling = true;
     final chunk = await widget.controller.fetchLogs(_cursor);
     _pulling = false;
@@ -143,8 +175,8 @@ class _LogsPageState extends State<LogsPage> {
     final rc = await widget.controller.applyUserRules(lines);
     if (!mounted) return;
     _snack(rc == 0
-        ? '已加入${allow ? '放行' : '拦截'}并热切换（rc=0）'
-        : '写入成功但热切换失败（rc=$rc）');
+        ? '已加入${allow ? '放行' : '拦截'}，规则已生效'
+        : '已写入规则，但刷新失败（rc=$rc）');
   }
 
   @override
@@ -154,11 +186,14 @@ class _LogsPageState extends State<LogsPage> {
     final filtered = _filtered;
     return GlassHeaderOverlay(
       title: '转发日志',
-      leading: HeaderIconButton(
-        icon: Icons.arrow_back,
-        tooltip: '返回',
-        onTap: () => Navigator.of(context).maybePop(),
-      ),
+      // 嵌入一级 Tab 时无可回退路由，不画返回键
+      leading: _embedded
+          ? null
+          : HeaderIconButton(
+              icon: Icons.arrow_back,
+              tooltip: '返回',
+              onTap: () => Navigator.of(context).maybePop(),
+            ),
       actions: [
         HeaderIconButton(
           icon: Icons.delete_sweep_outlined,
@@ -282,7 +317,7 @@ class _Header extends StatelessWidget {
   }
 }
 
-/// 单条日志：action 着色圆点 + 域名（加粗）+ 等宽副行。
+/// 单条日志：协议微标（左）+ 域名（加粗）+ 等宽副行 + 判定胶囊（右）。
 class _LogRow extends StatelessWidget {
   const _LogRow({required this.event, required this.onTap});
 
@@ -293,6 +328,14 @@ class _LogRow extends StatelessWidget {
         'block' => cs.error,
         'allow' => cs.primary,
         _ => cs.onSurfaceVariant,
+      };
+
+  String get _verdict => switch (event.action) {
+        'block' => '拦截',
+        'allow' => '放行',
+        'forward' => '转发',
+        'relay' => '中继',
+        _ => event.action,
       };
 
   @override
@@ -307,21 +350,36 @@ class _LogRow extends StatelessWidget {
     final ruleOrList = event.rule.isNotEmpty
         ? event.rule
         : (event.list.isNotEmpty ? event.list : '—');
+    // 协议已由左侧微标承担，副行只留时间 / 命中规则 / 目标 IP
     final subParts = [
       '$hh:$mm:$ss',
-      event.kind,
       ruleOrList,
       if (event.dest.isNotEmpty && event.domain.isNotEmpty) event.dest,
     ];
     return ContentCard(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       onTap: onTap,
       child: Row(
         children: [
+          // 协议微标：等宽 3 字符（DNS/TCP/UDP 天然对齐），扫读锚点；
+          // 判定语义色全部让给右侧胶囊，不再用圆点重复表达
           Container(
-            width: 9,
-            height: 9,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            decoration: BoxDecoration(
+              color: cs.onSurfaceVariant.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              event.kind.isEmpty ? '—' : event.kind.toUpperCase(),
+              style: TextStyle(
+                fontSize: 10,
+                height: 1.0,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.4,
+                fontFamily: 'monospace',
+                color: cs.onSurfaceVariant,
+              ),
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -338,7 +396,7 @@ class _LogRow extends StatelessWidget {
                     color: title.isEmpty ? cs.onSurfaceVariant : cs.onSurface,
                   ),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 3),
                 Text(
                   subParts.join(' · '),
                   maxLines: 1,
@@ -354,15 +412,22 @@ class _LogRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          Text(
-            switch (event.action) {
-              'block' => '拦截',
-              'allow' => '放行',
-              'forward' => '转发',
-              'relay' => '中继',
-              _ => event.action,
-            },
-            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: color),
+          // 判定胶囊：半透明语义底 + 语义色字，扫视效率高于裸文字
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Text(
+              _verdict,
+              style: TextStyle(
+                fontSize: 11.5,
+                height: 1.0,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
+            ),
           ),
         ],
       ),

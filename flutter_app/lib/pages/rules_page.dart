@@ -110,7 +110,7 @@ class _RulesPageState extends State<RulesPage> {
         await widget.controller.refreshRuleInfo();
         if (!mounted) return;
         _snack('${s.name} 已更新 ${r.lines} 行'
-            '${rc == 0 ? '，热切换 rc=0' : '，⚠ 热切换失败 rc=$rc'}'
+            '${rc == 0 ? '，规则已即时生效' : '，⚠ 规则切换失败（rc=$rc）'}'
             '${r.shrinkWarning ? '（⚠ 行数收缩>50%）' : ''}');
       case SourceFetchStatus.notModified:
         _snack('${s.name} 未变化（304）');
@@ -126,8 +126,8 @@ class _RulesPageState extends State<RulesPage> {
     await widget.controller.refreshRuleInfo();
     if (!mounted) return;
     _snack(rc == 0
-        ? '已删除 ${s.name} 并重载（rc=0）'
-        : '已删除 ${s.name}，重载失败（rc=$rc）');
+        ? '已删除 ${s.name}，规则已刷新'
+        : '已删除 ${s.name}，规则刷新失败（rc=$rc）');
   }
 
   void _sourceMenu(BuildContext anchorContext, SourceConfig s) {
@@ -165,7 +165,7 @@ class _RulesPageState extends State<RulesPage> {
   Future<void> _openUserRules() async {
     await showGlassBottomSheet(
       context,
-      title: '用户规则（zzz-user-rules.txt）',
+      title: '用户规则',
       // 内部自管约束（ConstrainedBox+Flexible），不套 SingleChildScrollView
       scrollable: false,
       builder: (_) => _UserRulesSheet(controller: widget.controller),
@@ -186,9 +186,9 @@ class _RulesPageState extends State<RulesPage> {
     setState(() => _reloading = false);
     final info = widget.controller.ruleInfo;
     _snack(rc == 0
-        ? '重载成功（rc=0）'
+        ? '规则已刷新'
             '${info == null ? '' : '：${info.lists} 个列表 / ${info.ruleLines} 行'}'
-        : '重载失败（rc=$rc）');
+        : '规则刷新失败（rc=$rc）');
   }
 
   @override
@@ -264,11 +264,14 @@ class _RulesPageState extends State<RulesPage> {
                               child: StatTile(
                                   label: '规则列表',
                                   value: '${info.lists}',
-                                  valueColor: cs.primary)),
+                                  valueColor: cs.primary,
+                                  flat: true)),
                           const SizedBox(width: 12),
                           Expanded(
                               child: StatTile(
-                                  label: '规则行', value: '${info.ruleLines}')),
+                                  label: '规则行',
+                                  value: '${info.ruleLines}',
+                                  flat: true)),
                         ],
                       ),
                       const SizedBox(height: 12),
@@ -277,7 +280,8 @@ class _RulesPageState extends State<RulesPage> {
                           Expanded(
                               child: StatTile(
                                   label: '规则体积',
-                                  value: formatBytes(info.ruleBytes))),
+                                  value: formatBytes(info.ruleBytes),
+                                  flat: true)),
                         ],
                       ),
                     ],
@@ -291,7 +295,7 @@ class _RulesPageState extends State<RulesPage> {
                       EmptyState(
                         icon: Icons.rule_outlined,
                         title: '引擎空载',
-                        subtitle: '未加载任何外部规则（fail-open，不拦截）',
+                        subtitle: '未加载任何外部规则，当前不拦截',
                       ),
                       SizedBox(height: 8),
                     ],
@@ -436,9 +440,9 @@ class _RulesPageState extends State<RulesPage> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      '订阅下载的 txt 与用户规则都落在这里，内核 *.txt 全量加载'
-                      '（M4-R1：内核无内嵌规则，规则全部外部可见；'
-                      '首启自动写入 starter.txt 与 protected-allow.txt 种子）。',
+                      '订阅下载的 txt 与自定义规则都落在这里，内核会加载目录下'
+                      '全部 txt；规则不内嵌进应用，文件始终外部可见。首次启动会'
+                      '自动写入 starter.txt 与 protected-allow.txt 两个种子文件。',
                       style: TextStyle(
                           fontSize: 12.5, color: cs.onSurfaceVariant, height: 1.5),
                     ),
@@ -491,8 +495,9 @@ class _BuiltInCardState extends State<_BuiltInCard> {
     final rc = await widget.controller.reloadRules();
     await widget.controller.refreshRuleInfo();
     if (!mounted) return;
-    _snack('已${wasEnabled ? '停用' : '启用'} ${e.domain}'
-        '（重载 ${rc == 0 ? 'rc=0' : '失败 rc=$rc'}）');
+    _snack(rc == 0
+        ? '已${wasEnabled ? '停用' : '启用'} ${e.domain}'
+        : '已${wasEnabled ? '停用' : '启用'} ${e.domain}，规则刷新失败（rc=$rc）');
   }
 
   @override
@@ -596,8 +601,8 @@ class _BuiltInCardState extends State<_BuiltInCard> {
             ),
             const SizedBox(height: 6),
             Text(
-              '启停写回种子文件本身（"! " 注释前缀，重载即时生效）；'
-              '仅可开关，不可增删改。',
+              '开关会写回规则文件（"! " 前缀即停用），刷新后即时生效；'
+              '内置规则仅可开关，不可增删改。',
               style: TextStyle(
                   fontSize: 12, color: cs.onSurfaceVariant, height: 1.5),
             ),
@@ -978,7 +983,7 @@ class _UserRulesSheetState extends State<_UserRulesSheet> {
     final rc = await widget.controller.applyUserRules(List.of(_lines));
     if (!mounted) return;
     setState(() => _busy = false);
-    _snack(rc == 0 ? '$okMsg（热切换 rc=0）' : '已写文件但热切换失败（rc=$rc）');
+    _snack(rc == 0 ? okMsg : '已写入规则，但刷新失败（rc=$rc）');
     await _load();
   }
 

@@ -9,11 +9,11 @@ import 'design/glass_reveal.dart';
 import 'design/glass_scope.dart';
 import 'pages/home_shell.dart';
 import 'pages/dashboard_page.dart';
-import 'pages/match_test_page.dart';
+import 'pages/logs_page.dart';
 import 'pages/rules_page.dart';
 import 'pages/settings_page.dart';
-import 'pages/stats_page.dart';
 import 'state/app_controller.dart';
+import 'state/theme.dart';
 
 void main() {
   runZonedGuarded(() {
@@ -29,6 +29,8 @@ void main() {
     controller.startPolling();
     // 方向1：种子规则写入 + 订阅 6h / App 24h 自动检查（内部全程 try/catch 静默）
     unawaited(controller.startBackgroundServices());
+    // 主题模式冷启动恢复（持久化于 config/theme-mode.txt，失败保持 system）
+    unawaited(loadAppThemeMode());
     runApp(const DragnetApp());
   }, (error, stack) {
     debugPrint('未捕获异常: $error\n$stack');
@@ -64,13 +66,17 @@ class DragnetApp extends StatelessWidget {
             final darkScheme = darkDynamic ??
                 ColorScheme.fromSeed(
                     seedColor: _seedColor, brightness: Brightness.dark);
-            return MaterialApp(
-              title: '罗网 Dragnet',
-              debugShowCheckedModeBanner: false,
-              themeMode: ThemeMode.system,
-              theme: _theme(lightScheme),
-              darkTheme: _theme(darkScheme),
-              home: const _Home(),
+            // 主题模式走全局 notifier（设置页点选即时生效并持久化）
+            return ValueListenableBuilder<ThemeMode>(
+              valueListenable: appThemeMode,
+              builder: (context, mode, _) => MaterialApp(
+                title: '罗网 Dragnet',
+                debugShowCheckedModeBanner: false,
+                themeMode: mode,
+                theme: _theme(lightScheme),
+                darkTheme: _theme(darkScheme),
+                home: const _Home(),
+              ),
             );
           },
         ),
@@ -95,26 +101,21 @@ class DragnetApp extends StatelessWidget {
   }
 }
 
+/// 一级 Tab：首页 / 日志 / 规则 / 设置。统计页内容与首页完全重复（运行时
+/// 8 项计数），按 2026-11-22 UI 评审口径撤下独立 Tab，把高频的转发日志
+/// 提升为一级页面；匹配自检属低频排障工具，只保留规则页一处入口，
+/// 底栏右侧独立圆钮让位给全站任意 Tab 都顺手的一键启停。
 class _Home extends StatelessWidget {
   const _Home();
-
-  void _openMatchTest(BuildContext context) {
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => MatchTestPage(controller: AppController.instance),
-    ));
-  }
 
   @override
   Widget build(BuildContext context) {
     final controller = AppController.instance;
     return HomeShell(
-      tabs: const ['首页', '统计', '规则', '设置'],
-      extraLabel: '自检',
-      extraIcon: Icons.fact_check_outlined,
-      extraOnTap: () => _openMatchTest(context),
+      tabs: const ['首页', '日志', '规则', '设置'],
       pages: [
         DashboardPage(controller: controller),
-        StatsPage(controller: controller),
+        LogsPage(controller: controller, tabIndex: 1),
         RulesPage(controller: controller),
         SettingsPage(controller: controller),
       ],

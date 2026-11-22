@@ -7,6 +7,10 @@ import 'package:liquid_glass_widgets/liquid_glass_widgets.dart' as lgw;
 import '../design/edge_fade_scrim.dart';
 import '../design/glass_scope.dart';
 import '../design/glass_tokens.dart';
+import '../state/app_controller.dart';
+
+/// 当前一级 Tab（IndexedStack 常驻所有页，LogsPage 靠它随 Tab 显停轮询）。
+final ValueNotifier<int> homeShellIndex = ValueNotifier<int>(0);
 
 /// 悬浮导航栏壳（指南 §6）。⛔ 不放 Scaffold.bottomNavigationBar——Scaffold
 /// 检测到该槽非 null 就给 body 套 removeBottom，全站 SafeArea 失效。一律
@@ -16,17 +20,11 @@ class HomeShell extends StatefulWidget {
     super.key,
     required this.tabs,
     required this.pages,
-    required this.extraOnTap,
-    required this.extraLabel,
-    required this.extraIcon,
     this.currentIndex = 0,
   });
 
   final List<String> tabs;
   final List<Widget> pages;
-  final VoidCallback extraOnTap;
-  final String extraLabel;
-  final IconData extraIcon;
   final int currentIndex;
 
   @override
@@ -91,6 +89,7 @@ class _HomeShellState extends State<HomeShell> {
       return;
     }
     setState(() => _index = index);
+    if (homeShellIndex.value != _index) homeShellIndex.value = _index;
   }
 
   void _setPressedIndex(int? index) {
@@ -103,7 +102,50 @@ class _HomeShellState extends State<HomeShell> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.currentIndex != widget.currentIndex) {
       _pressedIndex = null; // 交还路由
+      _index = widget.currentIndex;
+      if (homeShellIndex.value != _index) homeShellIndex.value = _index;
     }
+  }
+
+  // ── 一键启停（底栏右侧独立圆钮：高频动作，任意 Tab 顺手可达）──────────
+  Future<void> _togglePower() async {
+    final c = AppController.instance;
+    if (c.starting) return;
+    if (c.running) {
+      await c.stopBlock();
+      return;
+    }
+    final ok = await c.startBlock();
+    // 非首页场景失败也要有反馈（首页由 Hero 卡透出 lastError）
+    if (!ok && c.startError != null && mounted) {
+      ScaffoldMessenger.maybeOf(context)
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+            content: Text(c.startError!),
+            width: 360,
+            behavior: SnackBarBehavior.floating));
+    }
+  }
+
+  /// 电源钮图标（启停状态着色 + 启动中转圈，状态变化经 controller 通知）。
+  Widget _powerIcon(BuildContext context, {double size = 26}) {
+    final cs = Theme.of(context).colorScheme;
+    return AnimatedBuilder(
+      animation: AppController.instance,
+      builder: (context, _) {
+        final c = AppController.instance;
+        final color =
+            c.running ? cs.primary : (c.starting ? cs.primary : cs.onSurfaceVariant);
+        if (c.starting) {
+          return SizedBox(
+            width: size - 8,
+            height: size - 8,
+            child: CircularProgressIndicator(strokeWidth: 2.4, color: color),
+          );
+        }
+        return Icon(Icons.power_settings_new, size: size, color: color);
+      },
+    );
   }
 
   // ── 标签上限公式（指南 §6.2）：每格 ConstrainedBox 单行省略，图标恒定 ──
@@ -214,7 +256,7 @@ class _HomeShellState extends State<HomeShell> {
 
   IconData _tabIcon(int i) => switch (i) {
         0 => Icons.security_outlined,
-        1 => Icons.query_stats_outlined,
+        1 => Icons.receipt_long_outlined,
         2 => Icons.rule_outlined,
         _ => Icons.settings_outlined,
       };
@@ -234,9 +276,9 @@ class _HomeShellState extends State<HomeShell> {
       selectedIndex: _visualIndex,
       onTabSelected: _handleTabSelected,
       extraButton: lgw.GlassTabBarExtraButton(
-        icon: Icon(widget.extraIcon),
-        onTap: widget.extraOnTap,
-        label: widget.extraLabel,
+        icon: _powerIcon(context),
+        onTap: _togglePower,
+        label: '启停拦截',
         iconColor: cs.onSurface,
         size: GlassTokens.floatingActionSize, // 必须恒等于栏高
       ),
@@ -261,37 +303,44 @@ class _HomeShellState extends State<HomeShell> {
   // ── Material 档：同一几何、M3 材质（指南 §6.5）─────────────────────────
   Widget _buildMaterialBar(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return Material(
-      color: GlassTokens.materialFill(cs),
-      elevation: 0, // ⛔ 无投影："更浮"靠往上挑 surface container 色阶
-      shape: RoundedRectangleBorder(
-        borderRadius:
-            BorderRadius.circular(GlassTokens.floatingTabBarHeight / 2),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: SizedBox(
-        height: GlassTokens.floatingTabBarHeight,
-        child: Row(
-          children: [
-            for (var i = 0; i < widget.tabs.length; i++)
-              Expanded(
-                child: _MaterialTab(
-                  label: widget.tabs[i],
-                  icon: _tabIcon(i),
-                  selected: _visualIndex == i,
-                  onTap: () => _handleTabSelected(i),
-                ),
-              ),
-            SizedBox(width: 12),
-            _MaterialCircleButton(
-              size: GlassTokens.floatingActionSize,
-              icon: widget.extraIcon,
-              semanticLabel: widget.extraLabel,
-              onTap: widget.extraOnTap,
+    return Row(
+      children: [
+        Expanded(
+          child: Material(
+            color: GlassTokens.materialFill(cs),
+            elevation: 0, // ⛔ 无投影："更浮"靠往上挑 surface container 色阶
+            shape: RoundedRectangleBorder(
+              borderRadius:
+                  BorderRadius.circular(GlassTokens.floatingTabBarHeight / 2),
             ),
-          ],
+            clipBehavior: Clip.antiAlias,
+            child: SizedBox(
+              height: GlassTokens.floatingTabBarHeight,
+              child: Row(
+                children: [
+                  for (var i = 0; i < widget.tabs.length; i++)
+                    Expanded(
+                      child: _MaterialTab(
+                        label: widget.tabs[i],
+                        icon: _tabIcon(i),
+                        selected: _visualIndex == i,
+                        onTap: () => _handleTabSelected(i),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
         ),
-      ),
+        const SizedBox(width: 12),
+        // 独立圆钮：与液态档 extraButton 同几何（左胶囊 + 12 + 64 圆）
+        _MaterialCircleButton(
+          size: GlassTokens.floatingActionSize,
+          icon: _powerIcon(context),
+          semanticLabel: '启停拦截',
+          onTap: _togglePower,
+        ),
+      ],
     );
   }
 }
@@ -355,7 +404,7 @@ class _MaterialCircleButton extends StatelessWidget {
   });
 
   final double size;
-  final IconData icon;
+  final Widget icon;
   final String semanticLabel;
   final VoidCallback onTap;
 
@@ -366,16 +415,18 @@ class _MaterialCircleButton extends StatelessWidget {
       button: true,
       label: semanticLabel,
       child: Material(
-        color: Colors.transparent,
+        color: GlassTokens.materialFill(cs),
+        elevation: 0,
         shape: const CircleBorder(),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
           customBorder: const CircleBorder(),
           child: SizedBox(
-            width: size - 8,
+            // ⛔ 恒等栏高的正圆；之前塞在胶囊内 width:size-8 会成 56×64 椭圆
+            width: size,
             height: size,
-            child: Icon(icon, size: 26, color: cs.onSurface),
+            child: Center(child: icon),
           ),
         ),
       ),

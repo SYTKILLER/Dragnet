@@ -12,6 +12,7 @@ import '../design/glass_tokens.dart';
 import '../services/app_update.dart';
 import '../services/rule_source.dart';
 import '../state/app_controller.dart';
+import '../state/theme.dart';
 import 'common_cards.dart';
 
 /// 设置页（对齐鸿蒙 SettingsPage）：玻璃质感 / 主题 / 更新（App + 规则）/
@@ -26,7 +27,6 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  ThemeMode _themeMode = ThemeMode.system;
   bool _checkingApp = false;
   bool _checkingRules = false;
   bool _autoRules = true;
@@ -282,24 +282,30 @@ class _SettingsPageState extends State<SettingsPage> {
                   ],
                 ),
                 const SizedBox(height: 12),
-                Row(
-                  children: [
-                    for (final (i, mode) in const [
-                      (ThemeMode.system, '跟随系统'),
-                      (ThemeMode.light, '浅色'),
-                      (ThemeMode.dark, '深色'),
-                    ].indexed)
-                      Expanded(
-                        child: Padding(
-                          padding: EdgeInsets.only(left: i == 0 ? 0 : 8),
-                          child: _ThemeChip(
-                            label: mode.$2,
-                            selected: _themeMode == mode.$1,
-                            onTap: () => setState(() => _themeMode = mode.$1),
+                // 主题模式走全局 notifier（main.dart themeMode 由此驱动并持久化）
+                ValueListenableBuilder<ThemeMode>(
+                  valueListenable: appThemeMode,
+                  builder: (context, mode, _) {
+                    return Row(
+                      children: [
+                        for (final (i, m) in const [
+                          (ThemeMode.system, '跟随系统'),
+                          (ThemeMode.light, '浅色'),
+                          (ThemeMode.dark, '深色'),
+                        ].indexed)
+                          Expanded(
+                            child: Padding(
+                              padding: EdgeInsets.only(left: i == 0 ? 0 : 8),
+                              child: _ThemeChip(
+                                label: m.$2,
+                                selected: mode == m.$1,
+                                onTap: () => unawaited(saveAppThemeMode(m.$1)),
+                              ),
+                            ),
                           ),
-                        ),
-                      ),
-                  ],
+                      ],
+                    );
+                  },
                 ),
               ],
             ),
@@ -355,7 +361,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 _SettingsRow(
                   icon: Icons.cloud_download_outlined,
                   title: '立即检查规则更新',
-                  subtitle: '顺序拉取全部启用源并热切换',
+                  subtitle: '拉取全部启用的订阅源，更新后立即生效',
                   trailing: _checkingRules
                       ? const SizedBox(
                           width: 18,
@@ -522,44 +528,50 @@ class _SettingsRow extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 12),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Icon(icon, size: 20, color: cs.primary),
             const SizedBox(width: 12),
+            // 左列上下排布（标题 + 副标题）：窄屏下长副标题不再被挤成
+            // 右对齐碎字（2026-11-22 UI 评审）
             Expanded(
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Flexible(
-                    child: Text(title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            fontSize: 14.5,
-                            fontWeight: FontWeight.w600,
-                            color: cs.onSurface)),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.w600,
+                                color: cs.onSurface)),
+                      ),
+                      if (badge) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration:
+                              BoxDecoration(color: cs.error, shape: BoxShape.circle),
+                        ),
+                      ],
+                    ],
                   ),
-                  if (badge) ...[
-                    const SizedBox(width: 6),
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration:
-                          BoxDecoration(color: cs.error, shape: BoxShape.circle),
-                    ),
-                  ],
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(subtitle,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.end,
-                        style: TextStyle(
-                            fontSize: 11.5, color: cs.onSurfaceVariant)),
-                  ),
+                  const SizedBox(height: 2),
+                  Text(subtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 11.5, color: cs.onSurfaceVariant)),
                 ],
               ),
             ),
             if (trailing != null) ...[
-              const SizedBox(width: 4),
+              const SizedBox(width: 12),
               trailing!,
             ],
           ],
@@ -647,15 +659,27 @@ class _ThemeChip extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     return GlassSurface(
       height: 40,
+      // 选中态内衬高亮块：与 _GlassModeSegmented 滑块同色（selectedHighlight）
+      // 同圆角——浅色模式下选中项不再只靠文字色区分
+      padding: const EdgeInsets.all(4),
       onTap: onTap,
-      child: Center(
+      child: AnimatedContainer(
+        duration: GlassTokens.motionDuration,
+        curve: GlassTokens.motionCurve,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: selected
+              ? GlassTokens.selectedHighlight(cs)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+        ),
         child: Text(
           label,
           maxLines: 1,
           style: TextStyle(
             fontSize: 13.5,
             fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-            color: selected ? cs.primary : cs.onSurfaceVariant,
+            color: selected ? cs.onSurface : cs.onSurfaceVariant,
           ),
         ),
       ),
